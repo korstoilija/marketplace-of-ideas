@@ -130,4 +130,38 @@ export class Store {
   }
 
   close(): void { this.db.close(); }
+
+  placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {
+    if (o.shares <= 0) throw new Error("placeOrder: shares must be positive");
+    const m = this.getMarket(o.claimId);
+    if (!m) throw new Error(`placeOrder: no market for ${o.claimId}`);
+    if (m.resolution) throw new Error(`placeOrder: market ${o.claimId} already resolved`);
+    const agent = this.getAgent(o.agentId);
+    if (!agent) throw new Error(`placeOrder: unknown agent ${o.agentId}`);
+
+    const cost = buyCost(m.qYes, m.qNo, m.b, o.side, o.shares);
+    if (cost > agent.balance) throw new Error(`placeOrder: insufficient balance (${agent.balance.toFixed(1)} < ${cost.toFixed(1)})`);
+
+    const tx = this.db.transaction(() => {
+      this.adjustBalance(o.agentId, -cost);
+      const col = o.side === "yes" ? "q_yes" : "q_no";
+      this.db.prepare(`UPDATE markets SET ${col} = ${col} + ? WHERE claim_id = ?`).run(o.shares, o.claimId);
+      this.db.prepare(
+        `INSERT INTO positions (claim_id, agent_id, side, shares) VALUES (?, ?, ?, ?)
+         ON CONFLICT(claim_id, agent_id, side) DO UPDATE SET shares = shares + excluded.shares`,
+      ).run(o.claimId, o.agentId, o.side, o.shares);
+      this.db.prepare(
+        "INSERT INTO orders (claim_id, agent_id, side, shares, cost, iteration, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(o.claimId, o.agentId, o.side, o.shares, cost, this.currentIteration, Date.now());
+    });
+    tx();
+    return { cost, yesPrice: this.getMarket(o.claimId)!.yesPrice };
+  }
+
+  getPositions(agentId: string): Array<{ claimId: string; side: Side; shares: number }> {
+    const rows = this.db.prepare(
+      "SELECT claim_id, side, shares FROM positions WHERE agent_id = ? AND shares > 0 ORDER BY claim_id",
+    ).all(agentId) as Array<{ claim_id: string; side: Side; shares: number }>;
+    return rows.map(r => ({ claimId: r.claim_id, side: r.side, shares: r.shares }));
+  }
 }

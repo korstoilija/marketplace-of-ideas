@@ -51,3 +51,35 @@ describe("Store: agents, ideas, evidence", () => {
     expect(c.openMarkets).toBe(2);
   });
 });
+
+describe("Store: trading", () => {
+  let store: Store;
+  let claimId: string;
+  beforeEach(() => {
+    store = new Store(":memory:");
+    store.ensureAgent("alice");
+    store.ensureAgent("bob");
+    claimId = store.propose({ title: "T", summary: "s", body: "", claims: ["c"], author: "alice" }).claimIds[0];
+  });
+
+  it("placeOrder deducts LMSR cost (not share count) and moves price", () => {
+    const before = store.getAgent("alice")!.balance;
+    const r = store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 50 });
+    expect(r.cost).toBeGreaterThan(0);
+    expect(r.cost).not.toBeCloseTo(50);
+    expect(store.getAgent("alice")!.balance).toBeCloseTo(before - r.cost);
+    expect(store.getMarket(claimId)!.yesPrice).toBeGreaterThan(0.5);
+  });
+
+  it("rejects orders the agent cannot afford", () => {
+    expect(() => store.placeOrder({ claimId, agentId: "bob", side: "yes", shares: 1_000_000 }))
+      .toThrow(/insufficient/i);
+  });
+
+  it("accumulates positions per agent and side", () => {
+    store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 10 });
+    store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 15 });
+    const pos = store.getPositions("alice");
+    expect(pos).toEqual([{ claimId, side: "yes", shares: 25 }]);
+  });
+});
