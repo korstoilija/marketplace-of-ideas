@@ -7,7 +7,6 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "registry": "node dist/mcp/idea-registry/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist"
