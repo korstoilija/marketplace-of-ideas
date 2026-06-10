@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "registry": "node dist/mcp/server.js"
   },
   "dependencies": {
     "@ax-llm/ax": "^22.0.3",

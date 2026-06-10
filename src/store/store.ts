@@ -129,6 +129,38 @@ export class Store {
     };
   }
 
+  listAgents(): AgentRow[] {
+    const rows = this.db.prepare("SELECT * FROM agents ORDER BY agent_id").all() as Array<
+      { agent_id: string; balance: number; reputation: number; correct: number; total: number }>;
+    return rows.map(r => ({ agentId: r.agent_id, balance: r.balance, reputation: r.reputation, correct: r.correct, total: r.total }));
+  }
+
+  recentOrders(limit = 20): Array<{ claimId: string; agentId: string; side: Side; shares: number; cost: number; createdAt: number }> {
+    const rows = this.db.prepare(
+      "SELECT claim_id, agent_id, side, shares, cost, created_at FROM orders ORDER BY id DESC LIMIT ?",
+    ).all(limit) as Array<{ claim_id: string; agent_id: string; side: Side; shares: number; cost: number; created_at: number }>;
+    return rows.map(r => ({ claimId: r.claim_id, agentId: r.agent_id, side: r.side, shares: r.shares, cost: r.cost, createdAt: r.created_at }));
+  }
+
+  orderCount(claimId: string): number {
+    return (this.db.prepare("SELECT COUNT(*) n FROM orders WHERE claim_id = ?").get(claimId) as { n: number }).n;
+  }
+
+  priceHistory(claimId: string): Array<{ at: number; yesPrice: number }> {
+    const m = this.getMarket(claimId);
+    if (!m) return [];
+    const rows = this.db.prepare(
+      "SELECT side, shares, created_at FROM orders WHERE claim_id = ? ORDER BY id",
+    ).all(claimId) as Array<{ side: Side; shares: number; created_at: number }>;
+    let qYes = 0, qNo = 0;
+    const path = [{ at: 0, yesPrice: 0.5 }];
+    for (const r of rows) {
+      if (r.side === "yes") qYes += r.shares; else qNo += r.shares;
+      path.push({ at: r.created_at, yesPrice: lmsrPrice(qYes, qNo, m.b).yes });
+    }
+    return path;
+  }
+
   close(): void { this.db.close(); }
 
   placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {
