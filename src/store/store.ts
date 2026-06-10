@@ -164,4 +164,82 @@ export class Store {
     ).all(agentId) as Array<{ claim_id: string; side: Side; shares: number }>;
     return rows.map(r => ({ claimId: r.claim_id, side: r.side, shares: r.shares }));
   }
+
+  nominate(claimId: string, reason: string): void {
+    if (!this.getClaim(claimId)) throw new Error(`nominate: unknown claim ${claimId}`);
+    this.db.prepare(
+      "INSERT INTO nominations (claim_id, reason, created_at) VALUES (?, ?, ?) ON CONFLICT(claim_id) DO NOTHING",
+    ).run(claimId, reason, Date.now());
+  }
+
+  pendingNominations(): Array<{ claimId: string; reason: string }> {
+    const rows = this.db.prepare(
+      "SELECT claim_id, reason FROM nominations WHERE status = 'pending' ORDER BY created_at",
+    ).all() as Array<{ claim_id: string; reason: string }>;
+    return rows.map(r => ({ claimId: r.claim_id, reason: r.reason }));
+  }
+
+  skipNomination(claimId: string): void {
+    this.db.prepare("UPDATE nominations SET status = 'skipped' WHERE claim_id = ?").run(claimId);
+  }
+
+  applyAdjudication(claimId: string, outcome: boolean): void {
+    const m = this.getMarket(claimId);
+    if (!m) throw new Error(`applyAdjudication: no market for ${claimId}`);
+    if (m.resolution) throw new Error(`applyAdjudication: ${claimId} already resolved`);
+    const claim = this.getClaim(claimId)!;
+
+    const positions = this.db.prepare(
+      "SELECT agent_id, side, shares FROM positions WHERE claim_id = ? AND shares > 0",
+    ).all(claimId) as Array<{ agent_id: string; side: "yes" | "no"; shares: number }>;
+
+    const winningSide = outcome ? "yes" : "no";
+
+    const byAgent = new Map<string, { yes: number; no: number }>();
+    for (const p of positions) {
+      const e = byAgent.get(p.agent_id) ?? { yes: 0, no: 0 };
+      e[p.side] += p.shares;
+      byAgent.set(p.agent_id, e);
+    }
+
+    const tx = this.db.transaction(() => {
+      for (const p of positions) {
+        if (p.side === winningSide) this.adjustBalance(p.agent_id, p.shares);
+      }
+      for (const [agentId, pos] of byAgent) {
+        if (pos.yes === pos.no) continue;
+        const stanceCorrect = (pos.yes > pos.no) === outcome;
+        this.db.prepare(
+          "UPDATE agents SET total = total + 1, correct = correct + ?, reputation = CAST(correct + ? AS REAL) / (total + 1) WHERE agent_id = ?",
+        ).run(stanceCorrect ? 1 : 0, stanceCorrect ? 1 : 0, agentId);
+      }
+      this.db.prepare("UPDATE markets SET resolution = ?, resolved_at = ? WHERE claim_id = ?")
+        .run(outcome ? "true" : "false", Date.now(), claimId);
+      this.db.prepare("INSERT INTO adjudications (claim_id, outcome, ruled_at) VALUES (?, ?, ?)")
+        .run(claimId, outcome ? 1 : 0, Date.now());
+      this.db.prepare("UPDATE nominations SET status = 'ruled' WHERE claim_id = ?").run(claimId);
+
+      const ev = this.listEvidence(claimId);
+      this.db.prepare(
+        "INSERT INTO training_examples (claim_id, claim_text, supporting_json, counter_json, outcome, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(
+        claimId, claim.text,
+        JSON.stringify(ev.filter(e => e.stance === "supporting").map(e => e.excerpt)),
+        JSON.stringify(ev.filter(e => e.stance === "counter").map(e => e.excerpt)),
+        outcome ? 1 : 0, Date.now(),
+      );
+    });
+    tx();
+  }
+
+  listTrainingExamples(): Array<{ claimId: string; claimText: string; supporting: string[]; counter: string[]; outcome: boolean }> {
+    const rows = this.db.prepare("SELECT * FROM training_examples ORDER BY id").all() as Array<
+      { claim_id: string; claim_text: string; supporting_json: string; counter_json: string; outcome: number }>;
+    return rows.map(r => ({
+      claimId: r.claim_id, claimText: r.claim_text,
+      supporting: JSON.parse(r.supporting_json) as string[],
+      counter: JSON.parse(r.counter_json) as string[],
+      outcome: r.outcome === 1,
+    }));
+  }
 }
