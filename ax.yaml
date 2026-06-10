@@ -1,0 +1,14 @@
+profile: standard
+
+models:
+  default:
+    - anthropic/claude-sonnet-4-20250514
+
+providers:
+  mcp: database
+
+database: sqlite
+
+sandbox:
+  timeout_sec: 300
+  memory_mb: 1024
