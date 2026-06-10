@@ -96,13 +96,33 @@ describe("toolchain", () => {
     expect(gen).toBeTruthy();
     expect(typeof gen.forward).toBe("function");
   });
+
+  it("ax signature syntax used by later tasks parses: descriptions, number outputs, multi-field", () => {
+    // These are the EXACT signature shapes Tasks 8-9 rely on. If this fails, fix the
+    // signature strings here and in Task 9 to match the installed ax version BEFORE proceeding.
+    const writeCode = ax(
+      "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
+    );
+    const evaluate = ax(
+      "claimText:string, supportingEvidence:string, counterEvidence:string -> confidence:number \"probability 0-1 that the claim is true\", reasoning:string",
+    );
+    expect(typeof writeCode.forward).toBe("function");
+    expect(typeof evaluate.forward).toBe("function");
+  });
+
+  it("ai() accepts the deepseek provider name (no network call)", () => {
+    // Constructing the client must not throw; if it does, check accepted provider
+    // names in the @ax-llm/ax typings and fix the name here and in Task 9's buildProviders.
+    const llm = ai({ name: "deepseek", apiKey: "test-key-never-used" });
+    expect(llm).toBeTruthy();
+  });
 });
 ```
 
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run tests/toolchain.test.ts`
-Expected: 2 tests PASS. If the `ax(...)` construction throws, read the error — the signature string syntax may have drifted; check `node_modules/@ax-llm/ax/README.md` and adjust (this is the one external API we depend on).
+Expected: 4 tests PASS. If any `ax(...)` construction throws, the signature string syntax has drifted: check `node_modules/@ax-llm/ax/README.md`, fix the signature strings in this test until it passes, and use the SAME corrected syntax in Task 9. Do not proceed past this task with a failing toolchain test.
 
 - [ ] **Step 5: Commit**
 
@@ -641,15 +661,6 @@ describe("Store: trading", () => {
       .toThrow(/insufficient/i);
   });
 
-  // Unskip after Task 6 adds nominate/applyAdjudication.
-  it.skip("rejects orders on resolved markets", () => {
-    store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 10 });
-    store.nominate(claimId, "test");
-    store.applyAdjudication(claimId, true);
-    expect(() => store.placeOrder({ claimId, agentId: "bob", side: "no", shares: 5 }))
-      .toThrow(/resolved/i);
-  });
-
   it("accumulates positions per agent and side", () => {
     store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 10 });
     store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 15 });
@@ -666,7 +677,7 @@ Expected: FAIL — `placeOrder` does not exist.
 
 - [ ] **Step 3: Add trading methods to the Store class**
 
-Add inside `class Store` in `src/store/store.ts`:
+Add inside `class Store` in `src/store/store.ts` — paste the methods immediately BEFORE the existing `close(): void { this.db.close(); }` line, keeping `close()` as the last member of the class:
 
 ```typescript
   placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {
@@ -707,7 +718,7 @@ Add inside `class Store` in `src/store/store.ts`:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/store.test.ts`
-Expected: PASS (with the one `it.skip` pending Task 6).
+Expected: all PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -790,6 +801,14 @@ describe("nomination + adjudication", () => {
     store.applyAdjudication(claimId, true);
     expect(() => store.applyAdjudication(claimId, false)).toThrow(/resolved/i);
   });
+
+  it("rejects new orders on resolved markets", () => {
+    store.placeOrder({ claimId, agentId: "alice", side: "yes", shares: 10 });
+    store.nominate(claimId, "x");
+    store.applyAdjudication(claimId, true);
+    expect(() => store.placeOrder({ claimId, agentId: "bob", side: "no", shares: 5 }))
+      .toThrow(/resolved/i);
+  });
 });
 ```
 
@@ -800,7 +819,7 @@ Expected: FAIL — `nominate` does not exist.
 
 - [ ] **Step 3: Add nomination/adjudication methods to the Store class**
 
-Add inside `class Store` in `src/store/store.ts`:
+Add inside `class Store` in `src/store/store.ts` — paste the methods immediately BEFORE the existing `close(): void { this.db.close(); }` line, keeping `close()` as the last member of the class:
 
 ```typescript
   nominate(claimId: string, reason: string): void {
@@ -884,9 +903,8 @@ Add inside `class Store` in `src/store/store.ts`:
   }
 ```
 
-- [ ] **Step 4: Unskip the Task 5 resolved-market test, run everything**
+- [ ] **Step 4: Run everything**
 
-Remove the `.skip` from the "rejects orders on resolved markets" test in `tests/store.test.ts`.
 Run: `npx vitest run && npm run typecheck`
 Expected: all PASS.
 
@@ -1134,167 +1152,9 @@ git commit -m "feat: vm sandbox exposing store-backed marketplace API to agent c
 
 ---
 
-### Task 8: Codegen — Ax signatures, providers, code extraction
+### Task 8: RlmAgent — the recursive loop
 
-**Files:**
-- Create: `src/engine/codegen.ts`
-- Create: `tests/codegen.test.ts`
-
-- [ ] **Step 1: Write the failing tests**
-
-Create `tests/codegen.test.ts`:
-
-```typescript
-import { describe, it, expect } from "vitest";
-import { extractCode, buildProviders, SANDBOX_API_DOC } from "../src/engine/codegen.js";
-
-describe("extractCode", () => {
-  it("strips js fences", () => {
-    expect(extractCode("```js\nprint(1)\n```")).toBe("print(1)");
-    expect(extractCode("```javascript\nprint(1)\n```")).toBe("print(1)");
-  });
-  it("strips bare fences and passes plain code through", () => {
-    expect(extractCode("```\nprint(1)\n```")).toBe("print(1)");
-    expect(extractCode("print(1)")).toBe("print(1)");
-  });
-  it("takes the first fenced block when prose surrounds it", () => {
-    expect(extractCode("Here you go:\n```js\nprint(1)\n```\nHope that helps!")).toBe("print(1)");
-  });
-});
-
-describe("buildProviders", () => {
-  it("returns only providers whose env keys are set", () => {
-    const providers = buildProviders({ DEEPSEEK_API_KEY: "x" });
-    expect(providers.map(p => p.name)).toEqual(["deepseek"]);
-  });
-  it("returns empty for no keys", () => {
-    expect(buildProviders({})).toEqual([]);
-  });
-});
-
-describe("SANDBOX_API_DOC", () => {
-  it("documents every sandbox global", () => {
-    for (const name of ["ideas.propose", "market.buyYes", "market.buyNo", "market.price", "evidence.submit", "state()", "subAgent(", "llm(", "print(", "Final ="]) {
-      expect(SANDBOX_API_DOC).toContain(name);
-    }
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `npx vitest run tests/codegen.test.ts`
-Expected: FAIL — module not found.
-
-- [ ] **Step 3: Create src/engine/codegen.ts**
-
-```typescript
-import { ai, ax } from "@ax-llm/ax";
-import type { CodeGenerator, LeafEvaluator } from "./agent.js";
-
-export type AxLLM = ReturnType<typeof ai>;
-
-export interface Provider { name: string; llm: AxLLM }
-
-/** AxAI instance per provider with an env key set. DeepSeek first: it is the cheap default. */
-export function buildProviders(env: Record<string, string | undefined> = process.env): Provider[] {
-  const defs: Array<{ name: string; key: string }> = [
-    { name: "deepseek", key: "DEEPSEEK_API_KEY" },
-    { name: "mistral", key: "MISTRAL_API_KEY" },
-    { name: "anthropic", key: "ANTHROPIC_API_KEY" },
-    { name: "openai", key: "OPENAI_API_KEY" },
-  ];
-  return defs
-    .filter(d => env[d.key])
-    .map(d => ({ name: d.name, llm: ai({ name: d.name as Parameters<typeof ai>[0]["name"], apiKey: env[d.key]! }) }));
-}
-
-export const SANDBOX_API_DOC = `You write JavaScript executed in a sandbox. Available API (top-level await works):
-- ideas.propose({title, summary, body, claims: [string]}) -> {ideaId, claimIds}  // propose an idea; each claim gets a market
-- ideas.list() -> [{id, title, claimIds}]
-- ideas.get(id) -> {id, title, summary, body, claimIds}
-- market.buyYes(claimId, shares) -> {cost, yesPrice}  // stake tokens that claim is TRUE; cost is deducted from your balance
-- market.buyNo(claimId, shares) -> {cost, yesPrice}   // stake that it is FALSE
-- market.price(claimId) -> number                      // current YES price in (0,1); THE signal
-- market.positions() -> your holdings
-- evidence.submit(claimId, excerpt, stance, relevance?) // stance: "supporting" | "counter"
-- evidence.list(claimId) -> [{excerpt, stance, relevance}]
-- state() -> {ideas, claims, openMarkets, resolvedMarkets, balance, reputation}  // YOUR wallet
-- await subAgent(prompt) -> verdict                    // delegate a sub-question; returns structured result
-- await llm(prompt) -> string                          // one-shot LM call
-- print(...) // captured; the ONLY way to pass observations to your own next iteration
-- Final = {...} // set when your work is done; ends your loop
-
-RULES:
-1. Output ONLY runnable JavaScript. No markdown prose.
-2. Never dump large data; print short observations.
-3. You cannot settle markets. A human adjudicates. Your job: make prices informative.
-4. Stake proportional to your confidence. Being early and right is what pays.`;
-
-export const writeCodeSig = ax(
-  "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
-);
-
-export const evaluateClaimSig = ax(
-  "claimText:string, supportingEvidence:string, counterEvidence:string -> confidence:number \"probability 0-1 that the claim is true\", reasoning:string",
-);
-
-/** LLM output -> runnable code: prefer the first fenced block, else strip stray fences. */
-export function extractCode(response: string): string {
-  const fenced = response.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-  return response.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-}
-
-export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
-  return async (inputs) => {
-    const res = await writeCodeSig.forward(llm, {
-      task: `${inputs.task}\n\n${SANDBOX_API_DOC}`,
-      persona: inputs.persona,
-      stateMetadata: inputs.stateMetadata,
-      historyText: inputs.historyText || "(first iteration)",
-    });
-    return extractCode(String(res.code ?? ""));
-  };
-}
-
-export function makeLeafEvaluator(llm: AxLLM): LeafEvaluator {
-  return async (prompt) => {
-    const res = await evaluateClaimSig.forward(llm, {
-      claimText: prompt,
-      supportingEvidence: "(see claim text)",
-      counterEvidence: "(see claim text)",
-    });
-    const confidence = Math.max(0, Math.min(1, Number(res.confidence ?? 0.5)));
-    return { confidence, reasoning: String(res.reasoning ?? "") };
-  };
-}
-
-export function makeLlm(llm: AxLLM): (prompt: string) => Promise<string> {
-  const sig = ax("prompt:string -> response:string");
-  return async (prompt) => String((await sig.forward(llm, { prompt })).response ?? "");
-}
-```
-
-(Note: this file imports types from `./agent.js`, created in Task 9. If executing strictly in order, expect the typecheck to pass only after Task 9 — or create Task 9's `agent.ts` type stubs first. Recommended execution order if this bothers you: run Task 9 Steps 1–3 before this task's typecheck.)
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `npx vitest run tests/codegen.test.ts`
-Expected: all PASS. If `ai({ name: "deepseek", ... })` rejects the provider name at the type level, check the accepted names in the `@ax-llm/ax` typings and adjust the `defs` list — provider naming is the most drift-prone part of the Ax API.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/engine/codegen.ts tests/codegen.test.ts
-git commit -m "feat: Ax signatures, provider factory, code extraction"
-```
-
----
-
-### Task 9: RlmAgent — the recursive loop
-
-One class, no root/sub distinction. Takes a `CodeGenerator` function (production: `makeCodeGenerator`; tests: scripted) so the loop is testable without network. `subAgent()` spawns a child `RlmAgent` with the same wallet at `depth+1`; at `maxDepth` it calls the `LeafEvaluator` instead.
+One class, no root/sub distinction. Takes a `CodeGenerator` function (production: Task 9's `makeCodeGenerator`; in this task's tests: scripted stubs) so the loop is testable without network. This task also defines the `CodeGenerator`/`LeafEvaluator` types that Task 9 imports. `subAgent()` spawns a child `RlmAgent` with the same wallet at `depth+1`; at `maxDepth` it calls the `LeafEvaluator` instead.
 
 **Files:**
 - Create: `src/engine/agent.ts`
@@ -1523,13 +1383,171 @@ export class RlmAgent {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/agent.test.ts && npm run typecheck`
-Expected: all PASS (typecheck now also covers Task 8's import of these types).
+Expected: all PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/engine/agent.ts tests/agent.test.ts
 git commit -m "feat: recursive RlmAgent loop with shared-wallet subAgent and budget caps"
+```
+
+---
+
+### Task 9: Codegen — Ax signatures, providers, code extraction
+
+Production implementations of the `CodeGenerator`/`LeafEvaluator` types defined in Task 8, plus provider construction and code-fence extraction. The signature strings below are identical to the ones already validated by Task 1's toolchain test.
+
+**Files:**
+- Create: `src/engine/codegen.ts`
+- Create: `tests/codegen.test.ts`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `tests/codegen.test.ts`:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { extractCode, buildProviders, SANDBOX_API_DOC } from "../src/engine/codegen.js";
+
+describe("extractCode", () => {
+  it("strips js fences", () => {
+    expect(extractCode("```js\nprint(1)\n```")).toBe("print(1)");
+    expect(extractCode("```javascript\nprint(1)\n```")).toBe("print(1)");
+  });
+  it("strips bare fences and passes plain code through", () => {
+    expect(extractCode("```\nprint(1)\n```")).toBe("print(1)");
+    expect(extractCode("print(1)")).toBe("print(1)");
+  });
+  it("takes the first fenced block when prose surrounds it", () => {
+    expect(extractCode("Here you go:\n```js\nprint(1)\n```\nHope that helps!")).toBe("print(1)");
+  });
+});
+
+describe("buildProviders", () => {
+  it("returns only providers whose env keys are set", () => {
+    const providers = buildProviders({ DEEPSEEK_API_KEY: "x" });
+    expect(providers.map(p => p.name)).toEqual(["deepseek"]);
+  });
+  it("returns empty for no keys", () => {
+    expect(buildProviders({})).toEqual([]);
+  });
+});
+
+describe("SANDBOX_API_DOC", () => {
+  it("documents every sandbox global", () => {
+    for (const name of ["ideas.propose", "market.buyYes", "market.buyNo", "market.price", "evidence.submit", "state()", "subAgent(", "llm(", "print(", "Final ="]) {
+      expect(SANDBOX_API_DOC).toContain(name);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npx vitest run tests/codegen.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Create src/engine/codegen.ts**
+
+```typescript
+import { ai, ax } from "@ax-llm/ax";
+import type { CodeGenerator, LeafEvaluator } from "./agent.js";
+
+export type AxLLM = ReturnType<typeof ai>;
+
+export interface Provider { name: string; llm: AxLLM }
+
+/** AxAI instance per provider with an env key set. DeepSeek first: it is the cheap default. */
+export function buildProviders(env: Record<string, string | undefined> = process.env): Provider[] {
+  const defs: Array<{ name: string; key: string }> = [
+    { name: "deepseek", key: "DEEPSEEK_API_KEY" },
+    { name: "mistral", key: "MISTRAL_API_KEY" },
+    { name: "anthropic", key: "ANTHROPIC_API_KEY" },
+    { name: "openai", key: "OPENAI_API_KEY" },
+  ];
+  return defs
+    .filter(d => env[d.key])
+    .map(d => ({ name: d.name, llm: ai({ name: d.name as Parameters<typeof ai>[0]["name"], apiKey: env[d.key]! }) }));
+}
+
+export const SANDBOX_API_DOC = `You write JavaScript executed in a sandbox. Available API (top-level await works):
+- ideas.propose({title, summary, body, claims: [string]}) -> {ideaId, claimIds}  // propose an idea; each claim gets a market
+- ideas.list() -> [{id, title, claimIds}]
+- ideas.get(id) -> {id, title, summary, body, claimIds}
+- market.buyYes(claimId, shares) -> {cost, yesPrice}  // stake tokens that claim is TRUE; cost is deducted from your balance
+- market.buyNo(claimId, shares) -> {cost, yesPrice}   // stake that it is FALSE
+- market.price(claimId) -> number                      // current YES price in (0,1); THE signal
+- market.positions() -> your holdings
+- evidence.submit(claimId, excerpt, stance, relevance?) // stance: "supporting" | "counter"
+- evidence.list(claimId) -> [{excerpt, stance, relevance}]
+- state() -> {ideas, claims, openMarkets, resolvedMarkets, balance, reputation}  // YOUR wallet
+- await subAgent(prompt) -> verdict                    // delegate a sub-question; returns structured result
+- await llm(prompt) -> string                          // one-shot LM call
+- print(...) // captured; the ONLY way to pass observations to your own next iteration
+- Final = {...} // set when your work is done; ends your loop
+
+RULES:
+1. Output ONLY runnable JavaScript. No markdown prose.
+2. Never dump large data; print short observations.
+3. You cannot settle markets. A human adjudicates. Your job: make prices informative.
+4. Stake proportional to your confidence. Being early and right is what pays.`;
+
+export const writeCodeSig = ax(
+  "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
+);
+
+export const evaluateClaimSig = ax(
+  "claimText:string, supportingEvidence:string, counterEvidence:string -> confidence:number \"probability 0-1 that the claim is true\", reasoning:string",
+);
+
+/** LLM output -> runnable code: prefer the first fenced block, else strip stray fences. */
+export function extractCode(response: string): string {
+  const fenced = response.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  return response.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+}
+
+export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
+  return async (inputs) => {
+    const res = await writeCodeSig.forward(llm, {
+      task: `${inputs.task}\n\n${SANDBOX_API_DOC}`,
+      persona: inputs.persona,
+      stateMetadata: inputs.stateMetadata,
+      historyText: inputs.historyText || "(first iteration)",
+    });
+    return extractCode(String(res.code ?? ""));
+  };
+}
+
+export function makeLeafEvaluator(llm: AxLLM): LeafEvaluator {
+  return async (prompt) => {
+    const res = await evaluateClaimSig.forward(llm, {
+      claimText: prompt,
+      supportingEvidence: "(see claim text)",
+      counterEvidence: "(see claim text)",
+    });
+    const confidence = Math.max(0, Math.min(1, Number(res.confidence ?? 0.5)));
+    return { confidence, reasoning: String(res.reasoning ?? "") };
+  };
+}
+
+export function makeLlm(llm: AxLLM): (prompt: string) => Promise<string> {
+  const sig = ax("prompt:string -> response:string");
+  return async (prompt) => String((await sig.forward(llm, { prompt })).response ?? "");
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npx vitest run tests/codegen.test.ts && npm run typecheck`
+Expected: all PASS, clean typecheck (`./agent.js` exists — it was created in Task 8). Provider-name and signature-syntax drift were already caught by Task 1's toolchain test; if something fails here anyway, fix it the same way you fixed Task 1.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/engine/codegen.ts tests/codegen.test.ts
+git commit -m "feat: Ax signatures, provider factory, code extraction"
 ```
 
 ---
@@ -1845,6 +1863,7 @@ Then follow CLAUDE.md session completion. Note: no git remote exists yet — fla
 
 ## Self-Review (completed at plan-writing time)
 
-- **Spec coverage:** store/schema (T4–6), LMSR fixes incl. both economic bugs (T3, T5), claim-ID bug (T4 test), sandbox safety (T7), Ax layer (T8, T11), recursive agent + shared wallet + leaf degradation (T9), multi-trader sessions + budgets + nomination incl. stall rule (T10), human-only adjudication + training examples (T6), live smoke (T11), legacy deletion incl. keeping evaluate/mcp pair for Phase 2 (T2). Web UI, MCP rewire, GEPA run: later phases by design, bd issues filed (T12).
-- **Type consistency:** `Side` from lmsr.ts used in store; `CodeGenerator`/`LeafEvaluator` defined in agent.ts, consumed by codegen.ts and harness; `ExecResult` from sandbox.ts used in agent.ts. `store.db` is intentionally public (readonly) for harness SQL and tests. Task 8↔9 circular-order note is flagged inline.
-- **Placeholder scan:** every code step contains complete code; no TBDs. One deliberate `it.skip` in Task 5, explicitly unskipped in Task 6 Step 4.
+- **Spec coverage:** store/schema (T4–6), LMSR fixes incl. both economic bugs (T3, T5), claim-ID bug (T4 test), sandbox safety (T7), recursive agent + shared wallet + leaf degradation (T8), Ax layer (T9, T11), multi-trader sessions + budgets + nomination incl. stall rule (T10), human-only adjudication + training examples (T6), live smoke (T11), legacy deletion incl. keeping evaluate/mcp pair for Phase 2 (T2). Web UI, MCP rewire, GEPA run: later phases by design, bd issues filed (T12).
+- **Type consistency:** `Side` from lmsr.ts used in store; `CodeGenerator`/`LeafEvaluator` defined in agent.ts (T8), consumed by codegen.ts (T9) and harness (T10) — document order matches dependency order, no forward references; `ExecResult` from sandbox.ts used in agent.ts. `store.db` is intentionally public (readonly) for harness SQL and tests.
+- **Placeholder scan:** every code step contains complete code; no TBDs, no cross-task skip state — every task is self-contained and ends green.
+- **Literal-executor hardening:** Ax signature syntax and the deepseek provider name are validated in Task 1 before anything depends on them; class-method insertion points are anchored ("before `close()`"); no step requires diagnosing a planned failure.
