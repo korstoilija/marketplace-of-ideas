@@ -72,28 +72,31 @@ export function resolveMarket(
   outcome: boolean,
   agents: Record<string, AgentState>,
 ): { market: ClaimMarket; agents: Record<string, AgentState> } {
-  const winners = outcome ? market.yesShares : market.noShares;
-  const losers = outcome ? market.noShares : market.yesShares;
-  const totalLosing = Object.values(losers).reduce((a, b) => a + b, 0);
+  const winningShares = outcome ? market.yesShares : market.noShares;
+  const losingShares = outcome ? market.noShares : market.yesShares;
 
   const updatedAgents = { ...agents };
 
-  for (const [agentId, shares] of Object.entries(winners)) {
-    const proportion = shares / (Object.values(winners).reduce((a, b) => a + b, 0) || 1);
-    const reward = totalLosing * proportion;
-    const agent = updatedAgents[agentId] ?? { agentId, reputation: 0, tokenBalance: 0, correctPredictions: 0, totalPredictions: 0 };
+  for (const [agentId, shares] of Object.entries(winningShares)) {
+    const agent = updatedAgents[agentId] ?? {
+      agentId, reputation: 0, tokenBalance: 0,
+      correctPredictions: 0, totalPredictions: 0,
+    };
     updatedAgents[agentId] = {
       ...agent,
       agentId,
-      tokenBalance: agent.tokenBalance + reward + shares,
+      tokenBalance: agent.tokenBalance + shares,
       correctPredictions: agent.correctPredictions + 1,
       totalPredictions: agent.totalPredictions + 1,
       reputation: (agent.correctPredictions + 1) / (agent.totalPredictions + 1),
     };
   }
 
-  for (const agentId of Object.keys(losers)) {
-    const agent = updatedAgents[agentId] ?? { agentId, reputation: 0, tokenBalance: 0, correctPredictions: 0, totalPredictions: 0 };
+  for (const agentId of Object.keys(losingShares)) {
+    const agent = updatedAgents[agentId] ?? {
+      agentId, reputation: 0, tokenBalance: 0,
+      correctPredictions: 0, totalPredictions: 0,
+    };
     updatedAgents[agentId] = {
       ...agent,
       agentId,

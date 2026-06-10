@@ -1,7 +1,0 @@
-{
-  "name": "marketplace-repl-tools",
-  "version": "0.1.0",
-  "description": "Python REPL tools for RLM-style marketplace deliberation. Imported by the root agent in AX's Python REPL.",
-  "files": ["marketplace_tools.py"],
-  "dependencies": {}
-}

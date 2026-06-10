@@ -283,7 +283,7 @@ server.tool(
   "Evaluate a claim using a REAL LLM. Supports multiple providers. This is the core evaluation engine — not a stub.",
   {
     claimId: z.string(),
-    providers: z.array(z.enum(["deepseek", "anthropic", "openai", "mistral", "openrouter"])).default(["deepseek"]),
+    providers: z.array(z.enum(["openai", "anthropic", "deepseek", "mistral", "google-gemini", "grok"])).default(["deepseek"]),
   },
   async (params) => {
     const claim = claims.get(params.claimId);
@@ -319,7 +319,6 @@ server.tool(
           evaluators: results.length,
           individual: results.map(r => ({
             provider: r.provider,
-            model: r.model,
             confidence: r.verdict.confidence,
             reasoning: r.verdict.reasoning.slice(0, 200),
           })),
