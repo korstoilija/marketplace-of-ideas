@@ -80,6 +80,6 @@ export function makeLeafEvaluator(llm: AxLLM): LeafEvaluator {
 }
 
 export function makeLlm(llm: AxLLM): (prompt: string) => Promise<string> {
-  const sig = ax("prompt:string -> response:string");
-  return async (prompt) => String((await sig.forward(llm, { prompt })).response ?? "");
+  const sig = ax("prompt:string -> answer:string");
+  return async (prompt) => String((await sig.forward(llm, { prompt })).answer ?? "");
 }
