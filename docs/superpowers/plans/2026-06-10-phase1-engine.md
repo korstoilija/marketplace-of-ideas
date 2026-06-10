@@ -1846,7 +1846,7 @@ Expected: everything green.
 - [ ] **Step 2: File bd issues for Phase 2 and 3**
 
 ```bash
-bd create "Phase 2: resident service + web UI (adjudication surface, WebSocket state, MCP rewire)" -d "Per docs/superpowers/specs/2026-06-10-marketplace-of-ideas-ax-design.md. Also delete src/evaluate/sub-agent.ts when MCP is rewired."
+bd create "Phase 2: resident service + web UI (adjudication surface, WebSocket state, recreate MCP server against the store)" -d "Per docs/superpowers/specs/2026-06-10-marketplace-of-ideas-ax-design.md. The legacy MCP server was removed mid-Phase-1 (broken by the LMSR rewrite; preserved in git history) — recreate it reading the new Store. Fold src/evaluate/sub-agent.ts into the engine's leaf evaluator or delete it then."
 bd create "Phase 3: GEPA pass on evaluateClaim from human adjudications" -d "AxGEPA({studentAI}).compile(generator, examples, metric). Examples from store.listTrainingExamples(); metric = Brier-style calibration against human outcome. Report before/after."
 ```
 
