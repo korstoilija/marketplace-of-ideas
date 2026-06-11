@@ -12,7 +12,6 @@ import { llmSearch } from "../engine/search.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { BudgetGuard } from "../engine/budget.js";
-import { acceptToVault, listVault, getVaultEntry, type VaultEntry } from "../refinery/vault.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -369,33 +368,6 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         });
       }
 
-      // Vault
-      if (u === "/api/vault" && method === "GET") {
-        return json(res, { entries: listVault(store) });
-      }
-      const vaultEntry = u.match(/^\/api\/vault\/(.+)$/);
-      if (vaultEntry && method === "GET") {
-        const entry = getVaultEntry(store, vaultEntry[1]);
-        if (!entry) return json(res, { error: "not found" }, 404);
-        return json(res, { entry });
-      }
-      if (u === "/api/vault" && method === "POST") {
-        const body = await readBody(req);
-        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
-        const entry: VaultEntry = {
-          id: String(body["id"] ?? `vault-${Date.now()}`),
-          title: String(body["title"] ?? ""),
-          body: String(body["body"] ?? ""),
-          author: String(body["author"] ?? "human"),
-          value: Math.max(0, Math.min(1, Number(body["value"] ?? 0.5))),
-          lineage: (body["lineage"] as string[]) ?? [],
-          claims: (body["claims"] as Array<{ text: string; confidence: number; reason: string }>) ?? [],
-        };
-        if (!entry.title) return json(res, { error: "title required" }, 400);
-        const result = acceptToVault(store, entry);
-        _broadcast();
-        return json(res, { ok: true, bountyPaid: result.bountyPaid });
-      }
 
       if (u === "/api/seed" && method === "POST") {
         store.ensureAgent("seed");
