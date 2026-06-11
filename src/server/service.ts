@@ -343,7 +343,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         catch (err) { return json(res, { error: String(err instanceof Error ? err.message : err) }, 400); }
 
         session.start(runSession({
-          store, topic: topic + "\n\n" + buildContext(store),
+          store, topic, context: buildContext(store),
           traders: setup.traders,
           leafEvaluator: setup.leafEvaluator,
           llm: setup.llm,

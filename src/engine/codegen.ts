@@ -64,14 +64,20 @@ export function buildTemplate(title: string, claims: string[]): string {
 const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
 print("Seeded " + claimIds.length + " claims.");
 
-// Step 1: Add evidence for each claim
+// Step 1: Gather evidence for each claim — BOTH directions, stance decided by content.
+// recall() is model knowledge, not retrieval: submit it as the stance you asked for,
+// and ask for both sides so the market is not fed one-sided fabrication.
 for (const cid of claimIds) {
   const claimText = (ideas.get(ideaId)?.claims || []).find(c => c === cid) || cid;
-  const searchResult = await recall("evidence about: " + claimText);
-  if (searchResult && !searchResult.includes("error") && !searchResult.includes("unavailable")) {
-    evidence.submit(cid, searchResult.slice(0, 300), "supporting");
+  const pro = await recall("strongest evidence FOR: " + claimText);
+  if (pro && !pro.includes("error") && !pro.includes("unavailable")) {
+    evidence.submit(cid, pro.slice(0, 300), "supporting");
   }
-  print("Evidence submitted for " + cid);
+  const con = await recall("strongest evidence AGAINST: " + claimText);
+  if (con && !con.includes("error") && !con.includes("unavailable")) {
+    evidence.submit(cid, con.slice(0, 300), "counter");
+  }
+  print("Evidence gathered for " + cid);
 }
 
 // Step 2: Evaluate each claim with real LLM

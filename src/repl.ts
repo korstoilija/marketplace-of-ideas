@@ -15,7 +15,8 @@ async function api(path: string, opts?: RequestInit) {
 function show(state: Record<string, unknown>) {
   if (!state?.summary) return;
   const s = state.summary as Record<string, number>;
-  console.log(`\n${state.session?.running ? "⚡ RUNNING" : "⏸ idle"} | ideas:${s.ideas} claims:${s.claims} open:${s.openMarkets} resolved:${s.resolvedMarkets} | rulings:${state.trainingExamples ?? 0}/${state.minExamples ?? 30}`);
+  const session = state.session as { running?: boolean } | undefined;
+  console.log(`\n${session?.running ? "⚡ RUNNING" : "⏸ idle"} | ideas:${s.ideas} claims:${s.claims} open:${s.openMarkets} resolved:${s.resolvedMarkets} | rulings:${state.trainingExamples ?? 0}/${state.minExamples ?? 30}`);
   
   const pending = (state.pendingIdeas as Array<{ id: string; title: string }>) ?? [];
   if (pending.length) {

@@ -6,6 +6,8 @@ export interface TraderConfig { agentId: string; persona: string; codegen: CodeG
 export interface SessionConfig {
   store: Store;
   topic: string;
+  /** Extra task context for agents (marketplace state, target material). NOT part of the session's stored identity. */
+  context?: string;
   traders: TraderConfig[];
   leafEvaluator: LeafEvaluator;
   llm: (prompt: string) => Promise<string>;
@@ -63,7 +65,7 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
       new RlmAgent({
         agentId: t.agentId,
         persona: t.persona,
-        task: cfg.topic,
+        task: cfg.context ? `${cfg.topic}\n\n${cfg.context}` : cfg.topic,
         store,
         codegen: t.codegen,
         leafEvaluator: cfg.leafEvaluator,
@@ -73,6 +75,7 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
         maxSubAgentCalls: cfg.maxSubAgentCalls,
         sandboxTimeoutMs: cfg.sandboxTimeoutMs,
         onIteration,
+        recordIteration,
         recall: cfg.recall,
       }).run(),
     ),
