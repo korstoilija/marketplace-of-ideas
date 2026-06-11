@@ -85,6 +85,8 @@ async function drawSpark(svg) {
   svg.replaceChildren(line);
 }
 
+let wasOptimizing = false;
+
 function render(s) {
   $("st-ideas").textContent = s.summary.ideas;
   $("st-claims").textContent = s.summary.claims;
@@ -117,6 +119,9 @@ function render(s) {
     : (s.optimize.error
         ? `Last run: ${s.optimize.error}`
         : (have < need ? `${have}/${need} rulings collected — adjudicate more claims to enable.` : `${have} rulings ready.`));
+
+  if (wasOptimizing && !s.optimize.running) loadGepaHistory();
+  wasOptimizing = s.optimize.running;
 }
 
 document.addEventListener("click", async (e) => {

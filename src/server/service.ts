@@ -143,7 +143,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
   const session = new AsyncJob<SessionResult>(() => _broadcast?.());
   const optimize = new AsyncJob<GepaReport>(() => _broadcast?.());
 
-  const defaultGepaRunner = (): Promise<GepaReport> => {
+  const defaultGepaRunner = async (): Promise<GepaReport> => {
     const providers = buildProviders();
     if (providers.length === 0) throw new Error("no provider API keys set");
     return runGepa({ store, llm: providers[0].llm });
@@ -225,7 +225,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           return json(res, { error: `need ${MIN_EXAMPLES} adjudicated examples, have ${store.trainingExampleCount()}` }, 400);
         }
 
-        const started = optimize.start(gepaRunner());
+        const started = optimize.start(Promise.resolve().then(() => gepaRunner()));
         return json(res, { started });
       }
 
