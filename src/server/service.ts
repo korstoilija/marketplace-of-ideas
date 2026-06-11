@@ -12,6 +12,9 @@ import { selfImprove } from "./self-improve.js";
 import { llmSearch } from "../engine/search.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
+import { compileRiff, confirmInterpretations } from "../refinery/riff.js";
+import { scanSources, tier1Decompose } from "../refinery/cascade.js";
+import { BudgetGuard } from "../engine/budget.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -366,6 +369,45 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           trainingExamples: optimizeState.trainingExamples,
           minExamples: MIN_EXAMPLES,
         });
+      }
+
+      // Riff compiler
+      if (u === "/api/riff" && method === "POST") {
+        const body = await readBody(req);
+        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
+        const text = String(body["text"] ?? "").trim();
+        if (!text) return json(res, { error: "riff text required" }, 400);
+        const providers = buildProviders();
+        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
+        const interpretations = await compileRiff(store, text, providers[0].llm);
+        _broadcast();
+        return json(res, { interpretations });
+      }
+
+      if (u === "/api/riff/confirm" && method === "POST") {
+        const body = await readBody(req);
+        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
+        const confirmed = (body["confirmed"] as Array<{ id: number; accepted: boolean; confidenceOverride?: number }>) ?? [];
+        const results = confirmInterpretations(store, confirmed);
+        _broadcast();
+        return json(res, { results });
+      }
+
+      if (u === "/api/riff" && method === "GET") {
+        const rows = store.db.prepare("SELECT * FROM interpretations WHERE status='pending' ORDER BY id DESC LIMIT 20").all() as Array<Record<string, unknown>>;
+        return json(res, { interpretations: rows.map(r => ({ id: r.id, claimId: r.claim_id, kind: r.kind, confidence: r.confidence, reason: r.reason, quote: r.quote, text: r.reason, status: r.status })) });
+      }
+
+      // Cascade: refine now
+      if (u === "/api/refine" && method === "POST") {
+        const providers = buildProviders();
+        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
+        const budget = new BudgetGuard(store);
+        const items = scanSources(store);
+        if (items.length === 0) return json(res, { message: "no new sources to process" });
+        const result = await tier1Decompose(store, items, providers[0].llm, budget);
+        _broadcast();
+        return json(res, { ...result, sourcesScanned: items.length });
       }
 
       if (u === "/api/self-improve" && method === "POST") {
