@@ -474,8 +474,10 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         const briefs: Brief[] = [];
         for (const id of ideaIds) {
           if (!budget.canSpend(500)) break;
-          const brief = await synthesizeBrief(store, id, providers[0].llm, budget);
-          if (brief) briefs.push(brief);
+          try {
+            const brief = await synthesizeBrief(store, id, providers[0].llm, budget);
+            if (brief) briefs.push(brief);
+          } catch { /* brief synthesis failed for one idea */ }
         }
         const selected = selectBriefSet(briefs);
         _broadcast();

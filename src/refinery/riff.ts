@@ -37,7 +37,7 @@ export async function compileRiff(
   const context = contextItems.join("\n").slice(0, 3000);
 
   try {
-    const res = await riffSig.forward(llm, { riffText: riffText.slice(0, 2000), riffContext: context });
+    const res = await riffSig.forward(llm, { riffText: riffText.slice(0, 2000), riffContext: context || "no existing market context" });
 
     // Parse rulings
     const rulingsJson = String(res.rulings_json ?? "[]");
