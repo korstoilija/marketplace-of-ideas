@@ -10,6 +10,5 @@ export * from "./server/cards.js";
 export * from "./server/service.js";
 export * from "./optimize/gepa.js";
 export * from "./engine/budget.js";
-export * from "./refinery/index.js";
 export * from "./diversity/embed.js";
 export * from "./diversity/hill.js";

@@ -8,14 +8,10 @@ import { runSession, type SessionResult } from "../engine/harness.js";
 import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
 import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
-import { selfImprove } from "./self-improve.js";
 import { llmSearch } from "../engine/search.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
-import { compileRiff, confirmInterpretations } from "../refinery/riff.js";
-import { scanSources, tier1Decompose } from "../refinery/cascade.js";
 import { BudgetGuard } from "../engine/budget.js";
-import { synthesizeBrief, selectBriefSet, type Brief } from "../refinery/brief.js";
 import { acceptToVault, listVault, getVaultEntry, type VaultEntry } from "../refinery/vault.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
@@ -187,8 +183,6 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
     },
     trainingExamples: optimize.trainingExamples,
     minExamples: MIN_EXAMPLES,
-    vault: { entries: listVault(store) },
-    riff: { pending: (store.db.prepare("SELECT id, kind, claim_id, confidence, reason, quote, status FROM interpretations WHERE status='pending' ORDER BY id DESC LIMIT 10").all() as Array<Record<string, unknown>>).map(r => ({ id: r.id, kind: r.kind, claimId: r.claim_id, confidence: r.confidence, reason: r.reason, quote: r.quote, status: r.status })) },
     optimize: {
       running: optimize.job.running,
       error: optimize.job.error,
@@ -375,66 +369,6 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         });
       }
 
-      // Riff compiler
-      if (u === "/api/riff" && method === "POST") {
-        const body = await readBody(req);
-        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
-        const text = String(body["text"] ?? "").trim();
-        if (!text) return json(res, { error: "riff text required" }, 400);
-        const providers = buildProviders();
-        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
-        const interpretations = await compileRiff(store, text, providers[0].llm);
-        _broadcast();
-        return json(res, { interpretations });
-      }
-
-      if (u === "/api/riff/confirm" && method === "POST") {
-        const body = await readBody(req);
-        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
-        const confirmed = (body["confirmed"] as Array<{ id: number; accepted: boolean; confidenceOverride?: number }>) ?? [];
-        const results = confirmInterpretations(store, confirmed);
-        _broadcast();
-        return json(res, { results });
-      }
-
-      if (u === "/api/riff" && method === "GET") {
-        const rows = store.db.prepare("SELECT * FROM interpretations WHERE status='pending' ORDER BY id DESC LIMIT 20").all() as Array<Record<string, unknown>>;
-        return json(res, { interpretations: rows.map(r => ({ id: r.id, claimId: r.claim_id, kind: r.kind, confidence: r.confidence, reason: r.reason, quote: r.quote, text: r.reason, status: r.status })) });
-      }
-
-      // Cascade: refine now
-      if (u === "/api/refine" && method === "POST") {
-        const providers = buildProviders();
-        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
-        const budget = new BudgetGuard(store);
-        const items = scanSources(store);
-        if (items.length === 0) return json(res, { message: "no new sources to process" });
-        const result = await tier1Decompose(store, items, providers[0].llm, budget);
-        
-        // Auto-escalate to Tier 2: launch a market session for escalated claims
-        let tier2Launched = false;
-        if (result.escalated.length > 0 && providers.length > 0 && !session.running) {
-          const claims = result.escalated.flatMap(e => {
-            try { return JSON.parse(e.claimsJson).map((c: { text: string }) => c.text); }
-            catch { return []; }
-          });
-          if (claims.length > 0) {
-            const topic = `Refinery cascade: ${claims.slice(0, 2).join("; ")}`;
-            const setup = traderFactory(1);
-            session.start(runSession({
-              store, topic,
-              traders: setup.traders, leafEvaluator: setup.leafEvaluator, llm: setup.llm,
-              maxIterations: 5, maxDepth: 1, maxSubAgentCalls: 2,
-              sandboxTimeoutMs: 30_000, stallIterations: 10,
-            } as never), () => {});
-            tier2Launched = true;
-          }
-        }
-        
-        _broadcast();
-        return json(res, { sourcesScanned: items.length, tier1Count: result.tier1Count, escalatedCount: result.escalated.length, killedByZ: result.killedByZ, killedByCoherence: result.killedByCoherence, tier2Launched });
-      }
-
       // Vault
       if (u === "/api/vault" && method === "GET") {
         return json(res, { entries: listVault(store) });
@@ -461,40 +395,6 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         const result = acceptToVault(store, entry);
         _broadcast();
         return json(res, { ok: true, bountyPaid: result.bountyPaid });
-      }
-
-      // Briefs: synthesize from idea
-      if (u === "/api/briefs" && method === "POST") {
-        const body = await readBody(req);
-        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
-        const ideaIds = (body["ideaIds"] as string[]) ?? [];
-        if (!ideaIds.length) return json(res, { error: "ideaIds required" }, 400);
-        const providers = buildProviders();
-        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
-        const budget = new BudgetGuard(store);
-        const briefs: Brief[] = [];
-        for (const id of ideaIds) {
-          if (!budget.canSpend(500)) break;
-          try {
-            const brief = await synthesizeBrief(store, id, providers[0].llm, budget);
-            if (brief) briefs.push(brief);
-          } catch { /* brief synthesis failed for one idea */ }
-        }
-        const selected = selectBriefSet(briefs);
-        _broadcast();
-        return json(res, { briefs: selected, total: briefs.length, selected: selected.length });
-      }
-      if (u === "/api/briefs" && method === "GET") {
-        return json(res, { briefs: [] }); // Briefs are ephemeral; vault is permanent
-      }
-
-      if (u === "/api/self-improve" && method === "POST") {
-        try {
-          const result = await selfImprove(store);
-          return json(res, result);
-        } catch (err) {
-          return json(res, { error: String(err instanceof Error ? err.message : err) }, 500);
-        }
       }
 
       if (u === "/api/seed" && method === "POST") {
