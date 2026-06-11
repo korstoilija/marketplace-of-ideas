@@ -111,6 +111,7 @@ export class Store {
 
   // ── verdicts ──
   recordVerdict(v: { claimId: string; agentId: string; confidence: number; reasoning: string }): void {
+    if (!v.claimId) return; // Skip verdicts with empty claim IDs
     this.db.prepare(
       "INSERT INTO verdicts (claim_id, agent_id, confidence, reasoning, created_at) VALUES (?, ?, ?, ?, ?)",
     ).run(v.claimId, v.agentId, v.confidence, v.reasoning, Date.now());

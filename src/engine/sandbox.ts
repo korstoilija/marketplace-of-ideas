@@ -70,6 +70,7 @@ export class Sandbox {
       evaluate: async (claimId: string, supporting: string, counter: string) => {
         const claim = store.getClaim(claimId);
         const claimText = claim?.text || claimId;
+        if (!claimId || claimId === "undefined") return { aggregate: { confidence: 0.5, consensus: 1, divergence: 0 } };
         const prompt = `Evaluate this claim. Return a confidence score 0-1.\n\nCLAIM: ${claimText}\n\nSUPPORTING: ${supporting || "none"}\n\nCOUNTER: ${counter || "none"}\n\nReply with ONLY a JSON object: {"confidence": 0.X, "reasoning": "why"}`;
         
         // Primary evaluation
