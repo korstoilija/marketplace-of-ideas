@@ -125,8 +125,8 @@ export class Sandbox {
   public/ — web UI (index.html, app.js)
   State: propose→evidence→evaluate→recurse(ambiguous)→trade→nominate(0.7/0.3)→adjudicate→GEPA`,
       target: cfg.target ? {
-        list: (glob?: string) => cfg.target!.list(glob),
-        read: (path: string, offset = 0, maxBytes = 32768) => cfg.target!.read(path, offset, maxBytes),
+        list: (glob?: string) => { try { return cfg.target!.list(glob); } catch(e) { return []; } },
+        read: (path: string, offset = 0, maxBytes = 32768) => { try { return cfg.target!.read(path, offset, maxBytes); } catch(e) { return "target read error: " + (e instanceof Error ? e.message : String(e)); } },
       } : undefined,
       /** Interactive REPL: test code snippets and see results immediately.
        *  Agents use test() to explore the sandbox API before committing code. */
