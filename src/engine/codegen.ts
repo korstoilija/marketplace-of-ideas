@@ -19,26 +19,70 @@ export function buildProviders(env: Record<string, string | undefined> = process
 }
 
 export const SANDBOX_API_DOC = `You write JavaScript executed in a sandbox. Available API (top-level await works):
-- ideas.propose({title, summary, body, claims: [string]}) -> {ideaId, claimIds}  // propose an idea; each claim gets a market
-- ideas.list() -> [{id, title, claimIds}]
-- ideas.get(id) -> {id, title, summary, body, claimIds}
-- market.buyYes(claimId, shares) -> {cost, yesPrice}  // stake tokens that claim is TRUE; cost is deducted from your balance
-- market.buyNo(claimId, shares) -> {cost, yesPrice}   // stake that it is FALSE
-- market.price(claimId) -> number                      // current YES price in (0,1); THE signal
-- market.positions() -> your holdings
-- evidence.submit(claimId, excerpt, stance, relevance?) // stance: "supporting" | "counter"
-- evidence.list(claimId) -> [{excerpt, stance, relevance}]
-- state() -> {ideas, claims, openMarkets, resolvedMarkets, balance, reputation}  // YOUR wallet
-- await subAgent(prompt) -> verdict                    // delegate a sub-question; returns structured result
-- await llm(prompt) -> string                          // one-shot LM call
-- print(...) // captured; the ONLY way to pass observations to your own next iteration
-- Final = {...} // set when your work is done; ends your loop
+
+// --- IDEAS & CLAIMS ---
+ideas.propose({title, summary, body, claims: [string]}) -> {ideaId, claimIds}
+  // Each claim gets an LMSR prediction market. Use descriptive claim texts.
+ideas.list() -> [{id, title, claimIds}]
+ideas.get(id) -> {id, title, summary, body, claimIds}
+
+// --- EVIDENCE ---
+evidence.submit(claimId, excerpt, stance, relevance?)
+  // stance: "supporting" | "counter". Submit evidence BEFORE evaluating.
+evidence.list(claimId) -> [{excerpt, stance, relevance}]
+
+// --- TRADING (your wallet, your skin in the game) ---
+market.price(claimId) -> number  // current YES price in (0,1); THE signal
+market.buyYes(claimId, shares) -> {cost, yesPrice}  // stake: claim is TRUE
+market.buyNo(claimId, shares) -> {cost, yesPrice}   // stake: claim is FALSE
+market.positions() -> your holdings
+
+// --- META ---
+state() -> {ideas, claims, openMarkets, resolvedMarkets, balance, reputation}
+await subAgent(prompt) -> verdict  // recursive decomposition
+await llm(prompt) -> string        // one-shot LM call
+print(...)  // captured; passes observations to YOUR next iteration
+Final = {...}  // set when done
+
+// ═══════════════════════════════════════
+// DECOMPOSITION STRATEGY (RLM paper §5):
+// ═══════════════════════════════════════
+// 1. First iteration: propose ideas with claims, submit evidence
+// 2. Next: evaluate each claim → place orders based on confidence
+// 3. Check prices: high divergence → investigate deeper with subAgent()
+// 4. Set Final when all claims have been evaluated and traded
+
+// EXAMPLE — correct pattern:
+const { ideaId, claimIds } = ideas.propose({
+  title: "Topic Analysis",
+  summary: "Analyzing key claims about the topic",
+  body: "",
+  claims: ["Claim A: verifiable statement", "Claim B: verifiable statement"]
+});
+evidence.submit(claimIds[0], "Study shows X (2024)", "supporting");
+evidence.submit(claimIds[0], "Counter-study shows Y (2023)", "counter");
+evidence.submit(claimIds[1], "Data supports B", "supporting");
+evidence.submit(claimIds[1], "Alternative explanation exists", "counter");
+
+// Decompose: for claims you're unsure about, use subAgent
+const deep = await subAgent("evaluate: " + claimIds[0] + " in depth");
+
+for (const cid of claimIds) {
+  const price = market.price(cid);
+  print(cid + " price: " + price.toFixed(2));
+  if (price > 0.5) market.buyYes(cid, Math.abs(price - 0.5) * 100);
+  else market.buyNo(cid, Math.abs(price - 0.5) * 100);
+}
+
+Final = { summary: "Evaluated " + claimIds.length + " claims", prices: [market.price(claimIds[0]), market.price(claimIds[1])] };
 
 RULES:
-1. Output ONLY runnable JavaScript. No markdown prose.
-2. Never dump large data; print short observations.
-3. You cannot settle markets. A human adjudicates. Your job: make prices informative.
-4. Stake proportional to your confidence. Being early and right is what pays.`;
+1. Output ONLY runnable JavaScript. No markdown prose or code fences.
+2. DECOMPOSE FIRST. Propose ideas + evidence, THEN evaluate, THEN trade.
+3. Use subAgent() for deep dives on uncertain claims (Fisher: variance → learning).
+4. Stake proportional to your confidence (price distance from 0.5).
+5. You cannot settle markets. A human adjudicates.
+6. Print short observations each iteration. Being early and right pays.`;
 
 export const writeCodeSig = ax(
   "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
@@ -65,6 +109,30 @@ export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
     });
     return extractCode(String(res.code ?? ""));
   };
+}
+
+/** Extract successful decomposition patterns from session transcripts.
+ *  Finds iterations where agents used subAgent() or evidence.submit() and
+ *  returns them as in-context examples for the codegen prompt. */
+export function extractDecompositionExamples(
+  store: import("../store/store.js").Store,
+  limit = 3,
+): string[] {
+  const patterns: string[] = [];
+  const sessions = store.listSessions();
+  for (const s of sessions) {
+    if (patterns.length >= limit) break;
+    const iters = store.getSessionIterations(s.id);
+    for (const it of iters) {
+      if (patterns.length >= limit) break;
+      const hasDecomp = it.code.includes("subAgent(") ||
+        (it.code.includes("evidence.submit") && it.code.includes("placeOrder"));
+      if (hasDecomp && it.code.length > 50) {
+        patterns.push(it.code.slice(0, 500));
+      }
+    }
+  }
+  return patterns;
 }
 
 export function makeLeafEvaluator(llm: AxLLM): LeafEvaluator {
