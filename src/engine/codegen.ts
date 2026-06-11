@@ -49,11 +49,20 @@ export const contentSig = ax(
   "topic:string -> title:string \"short title for the idea\", claims:string[] \"2-3 verifiable claims about the topic\"",
 );
 
-/** LLM output -> runnable code: prefer the first fenced block, else strip stray fences. */
+/** LLM output -> runnable code: strip ALL non-code content. */
 export function extractCode(response: string): string {
-  const fenced = response.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-  return response.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  // Remove leading/trailing whitespace and pipe characters (common LLM artifact)
+  let code = response.replace(/^\s*\|\s*/gm, "").replace(/^\s*\|\|/gm, "//").trim();
+  // Remove markdown fences
+  const fenced = code.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
+  if (fenced) code = fenced[1].trim();
+  // If still has non-JS markers, try to find the first valid JS line and use from there
+  if (code.startsWith("//") || code.startsWith("|") || code.startsWith("```")) {
+    const lines = code.split("\n");
+    const jsStart = lines.findIndex(l => l.trim() && !l.trim().startsWith("//") && !l.trim().startsWith("|") && !l.trim().startsWith("```"));
+    if (jsStart > 0) code = lines.slice(jsStart).join("\n");
+  }
+  return code;
 }
 
 /** Build guaranteed-valid JavaScript from structured content. Zero failure rate. */
@@ -130,7 +139,19 @@ for (const cid of claimIds) {
   else if (finalConf < 0.45) market.buyNo(cid, shares);
   else print(cid + " remains ambiguous despite recursion");
 }
-print("Deliberation complete. " + claimIds.length + " claims evaluated" + (Object.keys(evaluations).length ? " with RLM recursion" : ""));`;
+print("Deliberation complete. " + claimIds.length + " claims evaluated" + (Object.keys(evaluations).length ? " with RLM recursion" : ""));
+
+// OBSERVE PRICES — they tell you what the market thinks
+for (const cid of claimIds) {
+  const p = market.price(cid);
+  const sig = p > 0.7 ? "STRONG TRUE" : p < 0.3 ? "STRONG FALSE" : p > 0.55 ? "weak true" : p < 0.45 ? "weak false" : "UNCERTAIN";
+  print(cid + " price=" + p.toFixed(2) + " (" + sig + ")");
+}
+
+// INCENTIVE: your trades earn reputation if the human later confirms your judgments
+// Check your balance, positions, and reputation — they compound across sessions
+const myPos = market.positions();
+print("My positions: " + myPos.length + " holdings");`;
 }
 
 /** Per-call code generator: first iteration uses contentSig + buildTemplate.

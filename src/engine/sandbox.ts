@@ -153,8 +153,9 @@ export class Sandbox {
         timedOut = true;
         error = `[TIMEOUT after ${this.timeoutMs / 1000}s]`;
       } else {
-        error = msg;
+        error = `[ERROR: ${msg}]`;
       }
+      this.captured += `\n${error}\n`;
     }
 
     const stdout = this.captured + (error ? `\n[ERROR: ${error}]` : "");
