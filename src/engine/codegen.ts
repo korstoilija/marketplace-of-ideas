@@ -31,16 +31,22 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   print(...)
   Final = {}
 
-CODE PATTERN (replace topic+claims; START with this pattern):
+CODE PATTERN (first iteration only — use ideas.propose to seed the market):
 const{ideaId,claimIds}=ideas.propose({title:"Your Topic Here",summary:"Evaluating claims",body:"",claims:["Claim 1","Claim 2"]});
 evidence.submit(claimIds[0],"Supporting evidence for claim 1","supporting");
 evidence.submit(claimIds[0],"Counter evidence for claim 1","counter");
-evidence.submit(claimIds[1],"Supporting evidence for claim 2","supporting");
-evidence.submit(claimIds[1],"Counter evidence for claim 2","counter");
 for(const cid of claimIds){const p=market.price(cid);const shares=Math.max(5,Math.abs(p-0.5)*200);if(p>0.55)market.buyYes(cid,shares);else if(p<0.45)market.buyNo(cid,shares);else print(cid+" price near 0.5, no trade")}
-Final={summary:"Done",claims:claimIds.length}
+Final={summary:"Seeded market",claims:claimIds.length}
 
-RULES: Write ONLY JavaScript. Use EXACT function names above. Never pass 0 or negative shares. Print what you did.`;
+SUBSEQUENT ITERATIONS — explore freely:
+- Read market prices with market.price(claimId)
+- Analyze your positions with market.positions()
+- Delegate to subAgent(prompt) for deep evaluation
+- Call llm(prompt) for quick questions
+- Write any JavaScript: loops, conditionals, data analysis
+- Print observations — they feed your NEXT iteration
+
+RULES: Use EXACT function names. Print what you observe. Fix errors.`;
 
 export const writeCodeSig = ax(
   "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
