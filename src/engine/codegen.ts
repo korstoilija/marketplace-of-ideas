@@ -20,34 +20,21 @@ export function buildProviders(env: Record<string, string | undefined> = process
 
 export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else exists):
   ideas.propose({title,summary,body,claims:[string]}) -> {ideaId,claimIds}
+  ideas.list() -> [{id,title,claimIds}]
+  ideas.get(id) -> {id,title,summary,body,claims}
   evidence.submit(claimId, excerpt, stance)   // stance: "supporting"|"counter"
+  evidence.list(claimId) -> [{excerpt,stance,relevance}]
   market.price(claimId) -> number
   market.buyYes(claimId, shares) -> {cost,yesPrice}
   market.buyNo(claimId, shares) -> {cost,yesPrice}
   market.positions() -> [{claimId,side,shares}]
+  await evaluate(claimId, supporting, counter) -> {aggregate:{confidence,consensus,divergence}}
   state() -> {ideas,claims,openMarkets,balance,reputation}
   await subAgent(prompt) -> verdict
   await llm(prompt) -> string
-  await search(query) -> string  // web search, returns evidence snippets
+  await recall(query) -> string  // knowledge retrieval, returns evidence snippets
   print(...)
-  Final = {}
-
-CODE PATTERN (first iteration only — use ideas.propose to seed the market):
-const{ideaId,claimIds}=ideas.propose({title:"Your Topic Here",summary:"Evaluating claims",body:"",claims:["Claim 1","Claim 2"]});
-evidence.submit(claimIds[0],"Supporting evidence for claim 1","supporting");
-evidence.submit(claimIds[0],"Counter evidence for claim 1","counter");
-for(const cid of claimIds){const p=market.price(cid);const shares=Math.max(5,Math.abs(p-0.5)*200);if(p>0.55)market.buyYes(cid,shares);else if(p<0.45)market.buyNo(cid,shares);else print(cid+" price near 0.5, no trade")}
-print("Seeded " + claimIds.length + " claims — market is live!");
-
-SUBSEQUENT ITERATIONS — explore freely:
-- Read market prices with market.price(claimId)
-- Analyze your positions with market.positions()
-- Delegate to subAgent(prompt) for deep evaluation
-- Call llm(prompt) for quick questions
-- Write any JavaScript: loops, conditionals, data analysis
-- Print observations — they feed your NEXT iteration
-
-RULES: Use EXACT function names. Print what you observe. Fix errors.`;
+  Final = {}`;
 
 export const writeCodeSig = ax(
   "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",

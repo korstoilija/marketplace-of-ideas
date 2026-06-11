@@ -206,6 +206,49 @@ export class Store {
 
   close(): void { this.db.close(); }
 
+  // ── Budget ledger ──
+  spendTokens(path: string, tokens = 1, runId = ""): void {
+    this.db.prepare("INSERT INTO budget_ledger (path, tokens, run_id, created_at) VALUES (?,?,?,?)").run(path, tokens, runId, Date.now());
+  }
+  tokensSpent(runId?: string): number {
+    const sql = runId ? "SELECT COALESCE(SUM(tokens),0) n FROM budget_ledger WHERE run_id=?" : "SELECT COALESCE(SUM(tokens),0) n FROM budget_ledger";
+    return (this.db.prepare(sql).get(runId || undefined) as { n: number }).n;
+  }
+  tokensSpentToday(): number {
+    const start = new Date();
+    start.setHours(0,0,0,0);
+    return (this.db.prepare("SELECT COALESCE(SUM(tokens),0) n FROM budget_ledger WHERE created_at >= ?").get(start.getTime()) as { n: number }).n;
+  }
+
+  // ── Tier 1 items ──
+  insertTier1Item(item: { sourceId?: number; text: string; claimsJson: string; maxSimilarity?: number; confidence?: number; coherenceScore?: number; escalated?: boolean; runId?: string }): number {
+    const r = this.db.prepare("INSERT INTO tier1_items (source_id, text, claims_json, max_similarity, confidence, coherence_score, escalated, run_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(item.sourceId||null, item.text, item.claimsJson, item.maxSimilarity||null, item.confidence||null, item.coherenceScore||null, item.escalated?1:0, item.runId||'', Date.now());
+    return Number(r.lastInsertRowid);
+  }
+  listTier1Unescalated(runId: string): Array<{ id: number; text: string; claimsJson: string; confidence: number | null }> {
+    return (this.db.prepare("SELECT id, text, claims_json, confidence FROM tier1_items WHERE run_id=? AND escalated=0").all(runId) as any[]).map(r=>({id:r.id, text:r.text, claimsJson:r.claims_json, confidence:r.confidence}));
+  }
+
+  // ── Embeddings ──
+  storeEmbedding(kind: string, refId: string, vector: Buffer, model = "mini"): void {
+    this.db.prepare("INSERT OR REPLACE INTO embeddings (kind, ref_id, vector, model, created_at) VALUES (?,?,?,?,?)").run(kind, refId, vector, model, Date.now());
+  }
+  getEmbedding(kind: string, refId: string): { vector: Buffer } | null {
+    return this.db.prepare("SELECT vector FROM embeddings WHERE kind=? AND ref_id=?").get(kind, refId) as { vector: Buffer } | undefined || null;
+  }
+
+  // ── Sources ──
+  registerSource(path: string, kind = "file"): number {
+    const r = this.db.prepare("INSERT OR IGNORE INTO sources (path, kind, created_at) VALUES (?,?,?)").run(path, kind, Date.now());
+    return Number(r.lastInsertRowid || (this.db.prepare("SELECT id FROM sources WHERE path=?").get(path) as { id: number }).id);
+  }
+  listSources(): Array<{ id: number; path: string; kind: string; lastHash: string | null; lastMtime: number | null }> {
+    return (this.db.prepare("SELECT * FROM sources").all() as any[]).map(r=>({id:r.id, path:r.path, kind:r.kind, lastHash:r.last_hash, lastMtime:r.last_mtime}));
+  }
+  updateSourceScan(id: number, hash: string, mtime: number): void {
+    this.db.prepare("UPDATE sources SET last_hash=?, last_mtime=? WHERE id=?").run(hash, mtime, id);
+  }
+
   placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {
     if (o.shares <= 0) throw new Error("placeOrder: shares must be positive");
     const m = this.getMarket(o.claimId);

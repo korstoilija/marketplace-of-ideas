@@ -19,7 +19,7 @@ export interface AgentConfig {
   sandboxTimeoutMs: number;
   depth?: number;
   onIteration?: (agentId: string, iteration: number) => void;
-  search?: (query: string) => Promise<string>;
+  recall?: (query: string) => Promise<string>;
   recordIteration?: (rec: { agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }) => void;
 }
 
@@ -69,7 +69,7 @@ export class RlmAgent {
       agentId,
       subAgent,
       llm: this.cfg.llm,
-      search: this.cfg.search,
+      recall: this.cfg.recall,
       timeoutMs: this.cfg.sandboxTimeoutMs,
     });
 
@@ -78,12 +78,15 @@ export class RlmAgent {
 
     for (let i = 0; i < this.cfg.maxIterations; i++) {
       subCallsThisIteration = 0;
-      const code = await this.cfg.codegen({
-        task: this.cfg.task,
-        persona: this.cfg.persona,
-        stateMetadata: this.buildMetadata(),
-        historyText: history.slice(-HISTORY_ENTRIES).join("\n"),
-      });
+      const code = await Promise.race([
+        this.cfg.codegen({
+          task: this.cfg.task,
+          persona: this.cfg.persona,
+          stateMetadata: this.buildMetadata(),
+          historyText: history.slice(-HISTORY_ENTRIES).join("\n"),
+        }),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("codegen timed out after 120s")), 120_000)),
+      ]);
 
       const result = await sandbox.execute(code);
       iterations.push({ code, result });

@@ -105,12 +105,13 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+function readBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", c => { body += c; });
+    req.on("data", c => { body += c; if (body.length > 1_000_000) body = ""; }); // 1MB limit
     req.on("end", () => {
-      try { resolve(JSON.parse(body)); } catch { resolve({}); }
+      if (!body) { resolve({}); return; }
+      try { resolve(JSON.parse(body)); } catch { resolve(null); } // null signals parse failure
     });
   });
 }
@@ -246,6 +247,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
       }
       if (u === "/api/judge" && method === "POST") {
         const body = await readBody(req);
+        if (body === null) return json(res, { error: "invalid JSON body" }, 400);
         const criteria = (body["criteria"] as Array<{ criterion: string; weight: number }>) ?? [];
         store.setJudgeCriteria(criteria);
         _broadcast();
@@ -323,7 +325,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           llm: setup.llm,
           maxIterations, maxDepth: 1, maxSubAgentCalls: 3,
           sandboxTimeoutMs: 30_000, stallIterations: 10,
-          search: llmSearch(setup.llm),
+          recall: llmSearch(setup.llm),
         } as never), (result, error) => {
           if (result) session.error = result.failures.map(f => `${f.agentId}: ${f.error}`).join("; ") || null;
         });
