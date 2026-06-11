@@ -105,13 +105,17 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function readBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+function parseFail(body: Record<string, unknown>): boolean {
+  return body["_parseError"] === true;
+}
+
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", c => { body += c; if (body.length > 1_000_000) body = ""; }); // 1MB limit
+    req.on("data", c => { body += c; if (body.length > 1_000_000) body = ""; });
     req.on("end", () => {
       if (!body) { resolve({}); return; }
-      try { resolve(JSON.parse(body)); } catch { resolve(null); } // null signals parse failure
+      try { resolve(JSON.parse(body)); } catch { resolve({ _parseError: true }); }
     });
   });
 }
@@ -247,7 +251,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
       }
       if (u === "/api/judge" && method === "POST") {
         const body = await readBody(req);
-        if (body === null) return json(res, { error: "invalid JSON body" }, 400);
+        if (parseFail(body)) return json(res, { error: "invalid JSON body" }, 400);
         const criteria = (body["criteria"] as Array<{ criterion: string; weight: number }>) ?? [];
         store.setJudgeCriteria(criteria);
         _broadcast();
