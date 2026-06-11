@@ -100,6 +100,25 @@ const TABLES: string[] = [
     program_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER
+  )`,
+  `CREATE TABLE IF NOT EXISTS agent_iterations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    agent_id TEXT NOT NULL,
+    depth INTEGER NOT NULL DEFAULT 0,
+    iteration INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    stdout TEXT NOT NULL,
+    timed_out INTEGER NOT NULL DEFAULT 0,
+    has_final INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 export function openDb(path: string): Db {

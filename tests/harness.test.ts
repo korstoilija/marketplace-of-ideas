@@ -56,6 +56,7 @@ describe("runSession", () => {
     });
     expect(result.runs).toHaveLength(2);
     expect(result.runs.every(r => r.final !== null)).toBe(true);
+    expect(result.sessionId).toBeGreaterThan(0);
     expect(store.counters().ideas).toBe(2);
     expect(store.getPositions("alpha")).toHaveLength(1);
     expect(store.getPositions("beta")).toHaveLength(1);
@@ -79,5 +80,35 @@ describe("runSession", () => {
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0].agentId).toBe("bad");
     expect(result.failures[0].error).toMatch(/provider down/);
+  });
+
+  it("runSession persists iterations including recursive children", async () => {
+    const store = new Store(":memory:");
+    let call = 0;
+    const gen: CodeGenerator = async () => {
+      call++;
+      if (call === 1) return `
+        const r = await subAgent("evaluate this sub-question");
+        print("sub returned: " + JSON.stringify(r));
+        Final = { main: true };
+      `;
+      return `Final = { sub: true };`;
+    };
+    const result = await runSession({
+      store, topic: "recursive test",
+      traders: [{ agentId: "parent", persona: "p", codegen: gen }],
+      leafEvaluator: async () => ({ confidence: 0.7, reasoning: "leaf" }),
+      llm: noopLlm,
+      maxIterations: 3, maxDepth: 3, maxSubAgentCalls: 5, sandboxTimeoutMs: 2000,
+      stallIterations: 10,
+    });
+    expect(result.runs).toHaveLength(1);
+    expect(result.sessionId).toBeGreaterThan(0);
+
+    const iters = store.getSessionIterations(result.sessionId);
+    expect(iters.length).toBeGreaterThanOrEqual(2);
+    const depths = iters.map(i => i.depth);
+    expect(depths).toContain(0);
+    expect(depths).toContain(1);
   });
 });

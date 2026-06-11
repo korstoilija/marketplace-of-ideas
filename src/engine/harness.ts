@@ -19,6 +19,7 @@ export interface SessionConfig {
 export interface SessionResult {
   runs: AgentRun[];
   failures: Array<{ agentId: string; error: string }>;
+  sessionId: number;
 }
 
 const PRICE_HI = 0.85;
@@ -48,6 +49,8 @@ export function scanNominations(store: Store, opts: { stallIterations: number })
 export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
   const { store } = cfg;
   store.currentIteration = 0;
+  const sessionId = store.createSession(cfg.topic, JSON.stringify({ traders: cfg.traders.map(t => ({ agentId: t.agentId, persona: t.persona })), maxIterations: cfg.maxIterations, maxDepth: cfg.maxDepth }));
+  const recordIteration = (rec: { agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }) => store.recordAgentIteration({ sessionId, ...rec });
 
   const onIteration = () => {
     store.currentIteration += 1;
@@ -69,6 +72,7 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
         maxSubAgentCalls: cfg.maxSubAgentCalls,
         sandboxTimeoutMs: cfg.sandboxTimeoutMs,
         onIteration,
+        recordIteration,
       }).run(),
     ),
   );
@@ -81,5 +85,6 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
   });
 
   scanNominations(store, { stallIterations: cfg.stallIterations });
-  return { runs, failures };
+  store.endSession(sessionId);
+  return { runs, failures, sessionId };
 }

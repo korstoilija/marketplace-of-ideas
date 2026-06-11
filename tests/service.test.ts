@@ -233,3 +233,103 @@ describe("optimize over HTTP", () => {
     expect(s.optimize).toEqual({ running: false, error: null });
   });
 });
+
+describe("session transcript endpoints", () => {
+  it("GET /api/sessions returns empty list initially", async () => {
+    const res = await fetch(url("/api/sessions"));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.sessions).toEqual([]);
+  });
+
+  it("GET /api/sessions lists sessions after a run", async () => {
+    await svc.close();
+    const store2 = new Store(":memory:");
+    const scripted = (title: string) => {
+      let done = false;
+      return async () => {
+        if (done) return `Final = { ok: true };`;
+        done = true;
+        return `print("hello from scripted"); Final = { ok: true };`;
+      };
+    };
+    const svc2 = await startService({
+      store: store2, port: 0,
+      traderFactory: (count) => ({
+        traders: Array.from({ length: count }, (_, i) => ({
+          agentId: `sess-${i}`, persona: "test", codegen: scripted(`Session ${i}`),
+        })),
+        leafEvaluator: async () => ({ confidence: 0.5, reasoning: "test" }),
+        llm: async () => "ok",
+      }),
+    });
+    try {
+      const u2 = (p: string) => `http://127.0.0.1:${svc2.port}${p}`;
+      await fetch(u2("/api/session"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: "transcript session", traders: 1, maxIterations: 2 }),
+      });
+      for (let i = 0; i < 100; i++) {
+        const s = await (await fetch(u2("/api/session"))).json();
+        if (!s.running) break;
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const res = await fetch(u2("/api/sessions"));
+      const data = await res.json();
+      expect(data.sessions.length).toBeGreaterThanOrEqual(1);
+      expect(data.sessions[0].topic).toBe("transcript session");
+      expect(data.sessions[0].iterations).toBeGreaterThan(0);
+    } finally {
+      await svc2.close();
+      store2.close();
+    }
+  });
+
+  it("GET /api/sessions/:id returns detail with iterations", async () => {
+    await svc.close();
+    const store2 = new Store(":memory:");
+    const code = `print("detail test"); Final = { ok: true };`;
+    const gen = async () => code;
+    const svc2 = await startService({
+      store: store2, port: 0,
+      traderFactory: (count) => ({
+        traders: Array.from({ length: count }, (_, i) => ({
+          agentId: `detail-${i}`, persona: "test", codegen: gen,
+        })),
+        leafEvaluator: async () => ({ confidence: 0.5, reasoning: "test" }),
+        llm: async () => "ok",
+      }),
+    });
+    try {
+      const u2 = (p: string) => `http://127.0.0.1:${svc2.port}${p}`;
+      await fetch(u2("/api/session"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: "detail topic", traders: 1, maxIterations: 2 }),
+      });
+      for (let i = 0; i < 100; i++) {
+        const s = await (await fetch(u2("/api/session"))).json();
+        if (!s.running) break;
+        await new Promise(r => setTimeout(r, 50));
+      }
+      const list = await (await fetch(u2("/api/sessions"))).json();
+      const sid = list.sessions[0].id;
+      const res = await fetch(u2(`/api/sessions/${sid}`));
+      const data = await res.json();
+      expect(data.session.topic).toBe("detail topic");
+      expect(data.iterations.length).toBeGreaterThan(0);
+      expect(data.iterations[0].code).toBe(code);
+    } finally {
+      await svc2.close();
+      store2.close();
+    }
+  });
+
+  it("GET /api/sessions/:id returns 404 on unknown session", async () => {
+    const res = await fetch(url("/api/sessions/99999"));
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.error).toMatch(/unknown session/);
+  });
+});

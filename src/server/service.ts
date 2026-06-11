@@ -8,6 +8,8 @@ import { runSession, type SessionResult } from "../engine/harness.js";
 import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
 import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
+import { computeMetrics } from "./metrics.js";
+import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -75,16 +77,30 @@ const PERSONAS = [
 
 function defaultTraderFactory(count: number): ReturnType<TraderFactory> {
   const providers = buildProviders();
-  if (providers.length === 0) throw new Error("no provider API keys set");
+  const cliTraders = (process.env["MP_CLI_TRADERS"] ?? "").split(",").map(s => s.trim()).filter(Boolean) as Array<"claude" | "codex">;
+  if (providers.length === 0 && cliTraders.length === 0) throw new Error("no provider API keys set and no CLI traders enabled");
   const traders: TraderSetup[] = Array.from({ length: count }, (_, i) => {
-    const p = providers[i % providers.length];
+    const pool = providers.length > 0 ? i % providers.length : 0;
+    if (i < providers.length) {
+      const p = providers[pool];
+      return {
+        agentId: `${p.name}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
+        persona: PERSONAS[i % PERSONAS.length],
+        codegen: makeCodeGenerator(p.llm),
+      };
+    }
+    const ci = (i - providers.length) % cliTraders.length;
+    const kind = cliTraders[ci];
     return {
-      agentId: `${p.name}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
+      agentId: `${kind}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
       persona: PERSONAS[i % PERSONAS.length],
-      codegen: makeCodeGenerator(p.llm),
+      codegen: makeCliCodeGenerator(kind),
     };
   });
-  return { traders, leafEvaluator: makeLeafEvaluator(providers[0].llm), llm: makeLlm(providers[0].llm) };
+  const primaryLlm = providers.length > 0 ? providers[0].llm : null;
+  const leafEvaluator = primaryLlm ? makeLeafEvaluator(primaryLlm) : async () => ({ confidence: 0.5, reasoning: "no API provider available" });
+  const llm = primaryLlm ? makeLlm(primaryLlm) : async (p: string) => `no API provider available for: ${p}`;
+  return { traders, leafEvaluator, llm };
 }
 
 function json(res: ServerResponse, data: unknown, status = 200): void {
@@ -162,6 +178,18 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
     try {
       if (u === "/api/state" && method === "GET") return json(res, snapshot(store, session, optimizeState));
       if (u === "/api/queue" && method === "GET") return json(res, { cards: buildAdjudicationCards(store) });
+      if (u === "/api/metrics" && method === "GET") return json(res, computeMetrics(store));
+
+      if (u === "/api/sessions" && method === "GET") {
+        return json(res, { sessions: store.listSessions() });
+      }
+      const sess = u.match(/^\/api\/sessions\/(\d+)$/);
+      if (sess && method === "GET") {
+        const id = Number(sess[1]);
+        const meta = store.listSessions().find(s => s.id === id);
+        if (!meta) return json(res, { error: `unknown session: ${id}` }, 404);
+        return json(res, { session: meta, iterations: store.getSessionIterations(id) });
+      }
 
       const hist = u.match(/^\/api\/history\/(.+)$/);
       if (hist && method === "GET") return json(res, { path: store.priceHistory(hist[1]) });

@@ -19,6 +19,7 @@ export interface AgentConfig {
   sandboxTimeoutMs: number;
   depth?: number;
   onIteration?: (agentId: string, iteration: number) => void;
+  recordIteration?: (rec: { agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }) => void;
 }
 
 export interface AgentRun {
@@ -84,6 +85,7 @@ export class RlmAgent {
 
       const result = await sandbox.execute(code);
       iterations.push({ code, result });
+      this.cfg.recordIteration?.({ agentId, depth: this.depth, iteration: i, code, stdout: result.stdout, timedOut: result.timedOut, hasFinal: result.hasFinal });
       history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);
       history.push(`[out ${i}] ${result.stdoutTruncated.slice(0, HISTORY_ENTRY_CHARS)}`);
       this.cfg.onIteration?.(agentId, i);

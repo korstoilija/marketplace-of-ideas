@@ -5,6 +5,7 @@ export * from "./engine/sandbox.js";
 export * from "./engine/agent.js";
 export * from "./engine/harness.js";
 export * from "./engine/codegen.js";
+export * from "./engine/cli-provider.js";
 export * from "./server/cards.js";
 export * from "./server/service.js";
 export * from "./optimize/gepa.js";

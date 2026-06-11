@@ -86,6 +86,7 @@ async function drawSpark(svg) {
 }
 
 let wasOptimizing = false;
+let wasSessionRunning = false;
 
 function render(s) {
   $("st-ideas").textContent = s.summary.ideas;
@@ -122,6 +123,9 @@ function render(s) {
 
   if (wasOptimizing && !s.optimize.running) loadGepaHistory();
   wasOptimizing = s.optimize.running;
+
+  if (wasSessionRunning && !s.session.running) { loadSessions(); loadMetrics(); }
+  wasSessionRunning = s.session.running;
 }
 
 document.addEventListener("click", async (e) => {
@@ -134,6 +138,7 @@ document.addEventListener("click", async (e) => {
     body: JSON.stringify({ claimId: btn.dataset.claim, ruling: btn.dataset.ruling }),
   });
   await refresh();
+  await loadMetrics();
 });
 
 $("sessionForm").addEventListener("submit", async (e) => {
@@ -199,3 +204,75 @@ async function loadGepaHistory() {
   } catch { /* server gone */ }
 }
 loadGepaHistory();
+
+async function loadMetrics() {
+  try {
+    const m = await (await fetch("/api/metrics")).json();
+    $("metrics").replaceChildren();
+    $("metrics").classList.remove("empty");
+    const tbl = el("table");
+    const addRow = (label, value) => tbl.append(el("tr", {},
+      el("td", {}, label),
+      el("td", {}, value == null ? "—" : String(value)),
+    ));
+    addRow("Adjudicated", m.adjudicated);
+    addRow("Mean price (true)", m.meanPriceTrue?.toFixed(3) ?? null);
+    addRow("Mean price (false)", m.meanPriceFalse?.toFixed(3) ?? null);
+    addRow("Informativeness", m.informativeness?.toFixed(3) ?? null);
+    addRow("Verdict variance", m.verdictVariance?.toFixed(4) ?? null);
+    addRow("Reputation spread", m.reputationSpread.toFixed(2));
+    $("metrics").append(tbl);
+    if (m.calibration.length) {
+      const cal = el("table");
+      cal.append(el("thead", {}, el("tr", {},
+        el("th", {}, "Bucket"),
+        el("th", {}, "N"),
+        el("th", {}, "Frac true"),
+      )));
+      for (const b of m.calibration) {
+        cal.append(el("tr", {},
+          el("td", {}, b.bucket),
+          el("td", {}, String(b.n)),
+          el("td", {}, b.n ? b.fracTrue.toFixed(2) : "—"),
+        ));
+      }
+      $("metrics").append(el("div", { style: "margin-top:6px" }, "Calibration:"), cal);
+    }
+  } catch { /* server gone */ }
+}
+
+async function loadSessions() {
+  try {
+    const { sessions } = await (await fetch("/api/sessions")).json();
+    if (!sessions || !sessions.length) {
+      $("sessions").replaceChildren(el("p", { class: "empty" }, "No sessions yet."));
+      return;
+    }
+    $("sessions").classList.remove("empty");
+    $("sessions").replaceChildren(...sessions.map(s =>
+      el("div", { class: "sessrow", "data-sid": s.id },
+        el("span", {}, `#${s.id} ${s.topic.slice(0, 60)}`),
+        el("span", { style: "color:var(--dim);font-size:12px" },
+          `${s.iterations} iters · ${s.agents} agents · ${new Date(s.startedAt).toLocaleTimeString()}`),
+      )));
+  } catch { /* server gone */ }
+}
+
+document.addEventListener("click", async (e) => {
+  const row = e.target.closest(".sessrow");
+  if (!row) return;
+  const id = parseInt(row.dataset.sid, 10);
+  const data = await (await fetch(`/api/sessions/${id}`)).json();
+  $("transcript").replaceChildren(
+    el("h2", { style: "font-size:13px;margin-top:10px" }, `Session #${id}: ${data.session.topic}`),
+    ...data.iterations.map(it =>
+      el("div", {},
+        el("div", { class: "it-head" }, `${it.agentId} depth=${it.depth} iter=${it.iteration} ${it.timedOut ? "TIMEOUT" : ""} ${it.hasFinal ? "FINAL" : ""}`),
+        el("pre", {}, it.code),
+        el("pre", { style: "color:var(--dim)" }, it.stdout.slice(0, 2000)),
+      )),
+  );
+});
+
+loadMetrics();
+loadSessions();

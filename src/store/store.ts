@@ -185,6 +185,25 @@ export class Store {
     return (this.db.prepare("SELECT COUNT(*) n FROM training_examples").get() as { n: number }).n;
   }
 
+  createSession(topic: string, configJson = "{}"): number {
+    const r = this.db.prepare("INSERT INTO sessions (topic, config_json, started_at) VALUES (?, ?, ?)").run(topic, configJson, Date.now());
+    return Number(r.lastInsertRowid);
+  }
+  endSession(sessionId: number): void {
+    this.db.prepare("UPDATE sessions SET ended_at = ? WHERE id = ?").run(Date.now(), sessionId);
+  }
+  recordAgentIteration(rec: { sessionId: number; agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }): void {
+    this.db.prepare("INSERT INTO agent_iterations (session_id, agent_id, depth, iteration, code, stdout, timed_out, has_final, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(rec.sessionId, rec.agentId, rec.depth, rec.iteration, rec.code.slice(0, 10000), rec.stdout.slice(0, 5000), rec.timedOut ? 1 : 0, rec.hasFinal ? 1 : 0, Date.now());
+  }
+  listSessions(): Array<{ id: number; topic: string; startedAt: number; endedAt: number | null; iterations: number; agents: number }> {
+    const rows = this.db.prepare(`SELECT s.id, s.topic, s.started_at, s.ended_at, (SELECT COUNT(*) FROM agent_iterations ai WHERE ai.session_id = s.id) AS iterations, (SELECT COUNT(DISTINCT ai.agent_id) FROM agent_iterations ai WHERE ai.session_id = s.id) AS agents FROM sessions s ORDER BY s.id DESC`).all() as Array<{ id: number; topic: string; started_at: number; ended_at: number | null; iterations: number; agents: number }>;
+    return rows.map(r => ({ id: r.id, topic: r.topic, startedAt: r.started_at, endedAt: r.ended_at, iterations: r.iterations, agents: r.agents }));
+  }
+  getSessionIterations(sessionId: number): Array<{ agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }> {
+    const rows = this.db.prepare("SELECT agent_id, depth, iteration, code, stdout, timed_out, has_final FROM agent_iterations WHERE session_id = ? ORDER BY id").all(sessionId) as Array<{ agent_id: string; depth: number; iteration: number; code: string; stdout: string; timed_out: number; has_final: number }>;
+    return rows.map(r => ({ agentId: r.agent_id, depth: r.depth, iteration: r.iteration, code: r.code, stdout: r.stdout, timedOut: r.timed_out === 1, hasFinal: r.has_final === 1 }));
+  }
+
   close(): void { this.db.close(); }
 
   placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {
