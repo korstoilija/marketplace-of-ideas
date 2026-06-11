@@ -11,7 +11,8 @@
     "test": "vitest run",
     "clean": "rm -rf dist",
     "registry": "node dist/mcp/server.js",
-    "tui": "node dist/tui.js"
+    "tui": "node dist/tui.js",
+    "mp": "node dist/mp.js"
   },
   "dependencies": {
     "@ax-llm/ax": "^22.0.3",
