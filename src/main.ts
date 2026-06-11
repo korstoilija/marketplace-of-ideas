@@ -7,6 +7,11 @@ const DB = process.env["MP_DB"] ?? "data/marketplace.sqlite";
 const store = new Store(DB);
 const svc = await startService({ store, port: PORT });
 
+// Global unhandled rejection handler — sandbox errors must never crash the process
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION (surviving):", String(reason instanceof Error ? reason.message : reason).slice(0, 200));
+});
+
 console.error(`Marketplace of Ideas — resident at http://127.0.0.1:${svc.port}`);
 console.error(`DB: ${DB}`);
 
