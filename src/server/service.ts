@@ -136,12 +136,18 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
       }))
     : [];
 
+  const allIdeas = store.listIdeas();
+  const allDbIdeas = store.db.prepare("SELECT id, status FROM ideas").all() as Array<{ id: string; status: string }>;
+  const statusMap = new Map(allDbIdeas.map(i => [i.id, i.status]));
+
   return {
     summary: store.counters(),
     agents: store.listAgents(),
-    ideas: store.listIdeas().map(i => ({
+    ideas: allIdeas.map(i => ({
       id: i.id,
       title: i.title,
+      status: statusMap.get(i.id) || "proposed",
+      approval: store.getApproval(i.id),
       claims: i.claimIds.map(cid => {
         const m = store.getMarket(cid);
         return {
@@ -153,6 +159,8 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
         };
       }),
     })),
+    pendingIdeas: allIdeas.filter(i => (statusMap.get(i.id) || "proposed") === "proposed").map(i => ({ id: i.id, title: i.title })),
+    judgeCriteria: store.getJudgeCriteria(),
     queue: buildAdjudicationCards(store),
     recentOrders: store.recentOrders(15),
     allLogs,

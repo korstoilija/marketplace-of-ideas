@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
-    "registry": "node dist/mcp/server.js"
+    "registry": "node dist/mcp/server.js",
+    "tui": "node dist/tui.js"
   },
   "dependencies": {
     "@ax-llm/ax": "^22.0.3",
