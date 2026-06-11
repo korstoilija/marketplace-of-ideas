@@ -33,6 +33,7 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   await subAgent(prompt) -> verdict
   await llm(prompt) -> string
   await recall(query) -> string  // knowledge retrieval, returns evidence snippets
+  await test(snippet) -> string   // REPL: test code snippets, see results immediately
   print(...)
   Final = {}
 

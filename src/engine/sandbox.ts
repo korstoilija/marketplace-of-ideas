@@ -128,6 +128,18 @@ export class Sandbox {
         list: (glob?: string) => cfg.target!.list(glob),
         read: (path: string, offset = 0, maxBytes = 32768) => cfg.target!.read(path, offset, maxBytes),
       } : undefined,
+      /** Interactive REPL: test code snippets and see results immediately.
+       *  Agents use test() to explore the sandbox API before committing code. */
+      test: async (snippet: string) => {
+        try {
+          const vm = await import("node:vm");
+          const ctx = vm.createContext({ ...this.box, __testResult: undefined });
+          await vm.runInContext(snippet, ctx, { timeout: 5000 });
+          return ctx["__testResult"] !== undefined ? ctx["__testResult"] : "ok (no return value)";
+        } catch (e) {
+          return "ERROR: " + (e instanceof Error ? e.message : String(e));
+        }
+      },
       Final: undefined as unknown,
     };
 

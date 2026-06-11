@@ -14,7 +14,6 @@ import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { BudgetGuard } from "../engine/budget.js";
 import { TargetJail } from "../engine/target.js";
 import { writeDossier } from "../enrich/dossier.js";
-import { llmSearch } from "../engine/search.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {

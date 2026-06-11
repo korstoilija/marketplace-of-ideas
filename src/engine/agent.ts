@@ -1,5 +1,6 @@
 import { Sandbox, type ExecResult } from "./sandbox.js";
 import type { Store } from "../store/store.js";
+import { Script } from "node:vm";
 
 export interface CodeGenInputs { task: string; persona: string; stateMetadata: string; historyText: string }
 export type CodeGenerator = (inputs: CodeGenInputs) => Promise<string>;
@@ -89,6 +90,18 @@ export class RlmAgent {
         }),
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error("codegen timed out after 120s")), 120_000)),
       ]);
+
+      // Validate syntax BEFORE execution — catch errors early, feed back to agent
+      try { new Script(code); }
+      catch (syntaxErr) {
+        const msg = syntaxErr instanceof Error ? syntaxErr.message : String(syntaxErr);
+        history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);
+        history.push(`[out ${i}] ⚠ SYNTAX ERROR (not executed): ${msg.slice(0, HISTORY_ENTRY_CHARS)}`);
+        history.push("FIX THE SYNTAX ERROR ABOVE. Check for invalid characters, missing brackets, or pipe symbols.");
+        iterations.push({ code, result: { stdout: "", stdoutTruncated: `SYNTAX ERROR: ${msg}`, error: msg, timedOut: false, hasFinal: false } });
+        this.cfg.onIteration?.(agentId, i);
+        continue;
+      }
 
       const result = await sandbox.execute(code);
       iterations.push({ code, result });
