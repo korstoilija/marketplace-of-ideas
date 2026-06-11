@@ -409,8 +409,29 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         const items = scanSources(store);
         if (items.length === 0) return json(res, { message: "no new sources to process" });
         const result = await tier1Decompose(store, items, providers[0].llm, budget);
+        
+        // Auto-escalate to Tier 2: launch a market session for escalated claims
+        let tier2Launched = false;
+        if (result.escalated.length > 0 && providers.length > 0 && !session.running) {
+          const claims = result.escalated.flatMap(e => {
+            try { return JSON.parse(e.claimsJson).map((c: { text: string }) => c.text); }
+            catch { return []; }
+          });
+          if (claims.length > 0) {
+            const topic = `Refinery cascade: ${claims.slice(0, 2).join("; ")}`;
+            const setup = traderFactory(1);
+            session.start(runSession({
+              store, topic,
+              traders: setup.traders, leafEvaluator: setup.leafEvaluator, llm: setup.llm,
+              maxIterations: 5, maxDepth: 1, maxSubAgentCalls: 2,
+              sandboxTimeoutMs: 30_000, stallIterations: 10,
+            } as never), () => {});
+            tier2Launched = true;
+          }
+        }
+        
         _broadcast();
-        return json(res, { sourcesScanned: items.length, tier1Count: result.tier1Count, escalatedCount: result.escalated.length, killedByZ: result.killedByZ, killedByCoherence: result.killedByCoherence });
+        return json(res, { sourcesScanned: items.length, tier1Count: result.tier1Count, escalatedCount: result.escalated.length, killedByZ: result.killedByZ, killedByCoherence: result.killedByCoherence, tier2Launched });
       }
 
       // Vault

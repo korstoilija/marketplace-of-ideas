@@ -41,7 +41,7 @@ export async function synthesizeBrief(
   const claimsJson = JSON.stringify(claims.slice(0, 5));
   const marketData = claims.map(c => `${c.text}: price=${c.price.toFixed(2)}${c.resolution ? " resolved " + c.resolution : ""}`).join("\n");
 
-  const res = await briefSig.forward(llm, { idea_title: idea.title, claims_json: claimsJson, market_data: marketData, vault_context: vaultContext });
+  const res = await briefSig.forward(llm, { idea_title: idea.title, claims_json: claimsJson, market_data: marketData, vault_context: vaultContext || "no existing vault context" });
 
   const estimatedValue = claims.reduce((s, c) => s + Math.abs(c.price - 0.5) * 2, 0) / Math.max(1, claims.length);
 
