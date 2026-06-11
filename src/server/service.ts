@@ -13,6 +13,7 @@ import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { BudgetGuard } from "../engine/budget.js";
 import { TargetJail } from "../engine/target.js";
+import { writeDossier } from "../enrich/dossier.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -375,7 +376,12 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           maxIterations: 8, maxDepth: 1, maxSubAgentCalls: 3,
           sandboxTimeoutMs: 30_000, stallIterations: 10,
           target,
-        } as never), () => {});
+        } as never), (result) => {
+          if (result) {
+            const outDir = writeDossier(store, path);
+            if (outDir) console.error(`Dossier written to ${outDir}`);
+          }
+        });
         return json(res, { started: true, path, files: files.length });
       }
 
