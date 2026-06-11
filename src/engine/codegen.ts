@@ -60,29 +60,51 @@ export function extractCode(response: string): string {
 export function buildTemplate(title: string, claims: string[]): string {
   const escapedTitle = JSON.stringify(title);
   const escapedClaims = JSON.stringify(claims);
-  return `const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
+  return `// RLM DELIBERATION PROTOCOL
+const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
+print("Seeded " + claimIds.length + " claims.");
+
+// Step 1: Add evidence for each claim
 for (const cid of claimIds) {
-  const p = market.price(cid);
-  const shares = Math.max(5, Math.abs(p - 0.5) * 200);
-  if (p > 0.55) market.buyYes(cid, shares);
-  else if (p < 0.45) market.buyNo(cid, shares);
-  else print(cid + " price:" + p.toFixed(2) + " (no trade)");
+  const claimText = (ideas.get(ideaId)?.claims || []).find(c => c === cid) || cid;
+  const searchResult = await recall("evidence about: " + claimText);
+  if (searchResult && !searchResult.includes("error") && !searchResult.includes("unavailable")) {
+    evidence.submit(cid, searchResult.slice(0, 300), "supporting");
+  }
+  print("Evidence submitted for " + cid);
 }
-print("Seeded " + claimIds.length + " claims — market is live!");
-// Force evaluation: the system evaluates every claim with real LLMs
+
+// Step 2: Evaluate each claim with real LLM
+const evaluations = {};
 for (const cid of claimIds) {
   const ev = evidence.list(cid) || [];
-  const sup = ev.filter(e=>e.stance==="supporting").map(e=>e.excerpt);
-  const cnt = ev.filter(e=>e.stance==="counter").map(e=>e.excerpt);
+  const sup = ev.filter(e => e.stance === "supporting").map(e => e.excerpt);
+  const cnt = ev.filter(e => e.stance === "counter").map(e => e.excerpt);
   const result = await evaluate(cid, sup.join("; ") || "no evidence", cnt.join("; ") || "no evidence");
   const conf = result?.aggregate?.confidence || 0.5;
+  evaluations[cid] = conf;
   print("Evaluated " + cid + ": confidence=" + conf.toFixed(2));
-  const shares = Math.max(20, Math.round(Math.abs(conf - 0.5) * 300));
-  if (conf > 0.55) market.buyYes(cid, shares);
-  else if (conf < 0.45) market.buyNo(cid, shares);
-  // If confidence 0.45-0.55: ambiguous — mark for deeper investigation
+  
+  // Step 3: RLM RECURSION — for ambiguous claims, decompose further
+  if (conf >= 0.35 && conf <= 0.65) {
+    print("Ambiguous claim — spawning sub-agent for deeper analysis: " + cid);
+    try {
+      const deep = await subAgent("Decompose this ambiguous claim into sub-claims and evaluate each: " + cid);
+      if (deep && deep.confidence !== undefined) {
+        evaluations[cid] = deep.confidence;
+        print("After decomposition: " + cid + " confidence=" + deep.confidence.toFixed(2));
+      }
+    } catch(e) { print("Sub-agent unavailable: " + cid); }
+  }
+  
+  // Step 4: Trade based on evaluation confidence
+  const finalConf = evaluations[cid];
+  const shares = Math.max(20, Math.round(Math.abs(finalConf - 0.5) * 300));
+  if (finalConf > 0.55) market.buyYes(cid, shares);
+  else if (finalConf < 0.45) market.buyNo(cid, shares);
+  else print(cid + " remains ambiguous despite recursion");
 }
-print("Evaluation complete. " + claimIds.length + " claims evaluated with real LLMs.");`;
+print("Deliberation complete. " + claimIds.length + " claims evaluated" + (Object.keys(evaluations).length ? " with RLM recursion" : ""));`;
 }
 
 /** Per-call code generator: first iteration uses contentSig + buildTemplate.
