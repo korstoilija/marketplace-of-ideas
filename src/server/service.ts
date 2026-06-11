@@ -218,6 +218,35 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         return void res.end(jsonl);
       }
 
+      if (u === "/api/approve" && method === "POST") {
+        const body = await readBody(req);
+        const ideaId = String(body["ideaId"] ?? "");
+        const mechanism = String(body["mechanism"] ?? "");
+        const falsification = String(body["falsification"] ?? "");
+        if (!store.getIdea(ideaId)) return json(res, { error: "unknown idea" }, 404);
+        store.approveIdea(ideaId, mechanism, falsification);
+        _broadcast();
+        return json(res, { ok: true, ideaId, status: "accepted" });
+      }
+      if (u === "/api/dismiss" && method === "POST") {
+        const body = await readBody(req);
+        const ideaId = String(body["ideaId"] ?? "");
+        if (!store.getIdea(ideaId)) return json(res, { error: "unknown idea" }, 404);
+        store.dismissIdea(ideaId);
+        _broadcast();
+        return json(res, { ok: true, ideaId, status: "rejected" });
+      }
+      if (u === "/api/judge" && method === "POST") {
+        const body = await readBody(req);
+        const criteria = (body["criteria"] as Array<{ criterion: string; weight: number }>) ?? [];
+        store.setJudgeCriteria(criteria);
+        _broadcast();
+        return json(res, { ok: true, count: criteria.length });
+      }
+      if (u === "/api/judge" && method === "GET") {
+        return json(res, { criteria: store.getJudgeCriteria() });
+      }
+
       if (u === "/api/sessions" && method === "GET") {
         return json(res, { sessions: store.listSessions() });
       }

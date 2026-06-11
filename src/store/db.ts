@@ -22,6 +22,20 @@ const TABLES: string[] = [
     created_at INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'proposed'
   )`,
+  `CREATE TABLE IF NOT EXISTS idea_approvals (
+    idea_id TEXT PRIMARY KEY REFERENCES ideas(id),
+    approved INTEGER NOT NULL DEFAULT 0,
+    approved_by TEXT NOT NULL DEFAULT 'human',
+    approved_at INTEGER,
+    mechanism TEXT NOT NULL DEFAULT '',
+    falsification TEXT NOT NULL DEFAULT ''
+  )`,
+  `CREATE TABLE IF NOT EXISTS judge_criteria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    criterion TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS claims (
     id TEXT PRIMARY KEY,
     idea_id TEXT NOT NULL REFERENCES ideas(id),

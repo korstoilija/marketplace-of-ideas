@@ -55,7 +55,15 @@ function sparkSvg(claimId) {
 
 function renderMarkets(ideas) {
   const blocks = ideas.flatMap(idea => [
-    el("div", { class: "idea-title" }, idea.title),
+    el("div", { class: "idea-title" },
+      idea.title,
+      idea.status === "proposed" ? el("span", { style: "color:var(--amber);font-size:11px;margin-left:6px" }, "pending") : null,
+      idea.status === "rejected" ? el("span", { style: "color:var(--red);font-size:11px;margin-left:6px" }, "rejected") : null,
+    ),
+    idea.status === "proposed" ? el("div", { style: "display:flex;gap:6px;margin:4px 0" },
+      el("button", { class: "rule-true", "data-approve": idea.id }, "Approve"),
+      el("button", { class: "rule-false", "data-dismiss": idea.id }, "Dismiss"),
+    ) : null,
     ...idea.claims.map(c => {
       const bar = el("div", { class: "pricebar" }, el("i", { style: `width:${(c.yesPrice * 100).toFixed(1)}%` }));
       const left = el("div", {}, c.text, c.resolution ? ` — ${c.resolution.toUpperCase()}` : "", bar);
@@ -191,7 +199,25 @@ function render(s) {
 
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-claim]");
-  if (!btn) return;
+  if (!btn) {
+    const approve = e.target.closest("button[data-approve]");
+    if (approve) {
+      approve.disabled = true;
+      const mech = prompt("Mechanism (how does this work?)") || "";
+      const falsif = prompt("Falsification test (what would prove it wrong?)") || "";
+      await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ideaId: approve.dataset.approve, mechanism: mech, falsification: falsif }) });
+      await refresh();
+      return;
+    }
+    const dismiss = e.target.closest("button[data-dismiss]");
+    if (dismiss) {
+      dismiss.disabled = true;
+      await fetch("/api/dismiss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ideaId: dismiss.dataset.dismiss }) });
+      await refresh();
+      return;
+    }
+    return;
+  }
   btn.disabled = true;
   await fetch("/api/adjudicate", {
     method: "POST",

@@ -317,4 +317,28 @@ export class Store {
       outcome: r.outcome === 1,
     }));
   }
+
+  // ── Ghost lifecycle ──
+  approveIdea(ideaId: string, mechanism = "", falsification = ""): void {
+    this.db.prepare("INSERT INTO idea_approvals (idea_id, approved, approved_at, mechanism, falsification) VALUES (?, 1, ?, ?, ?) ON CONFLICT(idea_id) DO UPDATE SET approved=1, approved_at=excluded.approved_at, mechanism=excluded.mechanism, falsification=excluded.falsification").run(ideaId, Date.now(), mechanism, falsification);
+    this.db.prepare("UPDATE ideas SET status='accepted' WHERE id=?").run(ideaId);
+  }
+  dismissIdea(ideaId: string): void {
+    this.db.prepare("INSERT INTO idea_approvals (idea_id, approved, approved_at) VALUES (?, 0, ?) ON CONFLICT(idea_id) DO UPDATE SET approved=0, approved_at=excluded.approved_at").run(ideaId, Date.now());
+    this.db.prepare("UPDATE ideas SET status='rejected' WHERE id=?").run(ideaId);
+  }
+  getApproval(ideaId: string): { approved: boolean; mechanism: string; falsification: string } | null {
+    const r = this.db.prepare("SELECT approved, mechanism, falsification FROM idea_approvals WHERE idea_id=?").get(ideaId) as { approved: number; mechanism: string; falsification: string } | undefined;
+    return r ? { approved: r.approved === 1, mechanism: r.mechanism, falsification: r.falsification } : null;
+  }
+  setJudgeCriteria(criteria: Array<{ criterion: string; weight: number }>): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM judge_criteria").run();
+      for (const c of criteria) this.db.prepare("INSERT INTO judge_criteria (criterion, weight, created_at) VALUES (?,?,?)").run(c.criterion, c.weight, Date.now());
+    });
+    tx();
+  }
+  getJudgeCriteria(): Array<{ criterion: string; weight: number }> {
+    return (this.db.prepare("SELECT criterion, weight FROM judge_criteria ORDER BY id").all() as Array<{ criterion: string; weight: number }>);
+  }
 }
