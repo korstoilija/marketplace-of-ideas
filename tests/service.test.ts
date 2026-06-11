@@ -198,3 +198,38 @@ describe("websocket", () => {
     ws.close();
   });
 });
+
+describe("optimize over HTTP", () => {
+  it("400s below the example threshold, reporting the count", async () => {
+    const res = await fetch(url("/api/optimize"), { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/have 0/);
+  });
+
+  it("runs an injected fake optimization and reports before/after", async () => {
+    await svc.close();
+    svc = await startService({
+      store, port: 0,
+      gepaRunner: async () => ({ baseline: 0.6, optimized: 0.8, trainSize: 6, holdoutSize: 2, applied: true }),
+    });
+
+    const start = await fetch(url("/api/optimize"), { method: "POST" });
+    expect(start.status).toBe(200);
+
+    for (let i = 0; i < 100; i++) {
+      const s = await (await fetch(url("/api/optimize"))).json();
+      if (!s.running) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+    const s = await (await fetch(url("/api/optimize"))).json();
+    expect(s.running).toBe(false);
+    expect(s.last.baseline).toBe(0.6);
+    expect(s.last.optimized).toBe(0.8);
+  });
+
+  it("snapshot carries trainingExamples count and optimize state", async () => {
+    const s = await (await fetch(url("/api/state"))).json();
+    expect(s.trainingExamples).toBe(0);
+    expect(s.optimize).toEqual({ running: false, error: null });
+  });
+});

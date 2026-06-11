@@ -7,6 +7,7 @@ import { buildAdjudicationCards } from "./cards.js";
 import { runSession, type SessionResult } from "../engine/harness.js";
 import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
+import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport } from "../optimize/gepa.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -26,6 +27,7 @@ export interface ServiceConfig {
   port: number;
   traderFactory?: TraderFactory;
   broadcastMs?: number;
+  gepaRunner?: () => Promise<GepaReport>;
 }
 
 export interface Service {
@@ -72,8 +74,9 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 interface SessionState { running: boolean; error: string | null; last: SessionResult | null }
+interface OptimizeState { running: boolean; error: string | null; last: GepaReport | null }
 
-function snapshot(store: Store, session: SessionState) {
+function snapshot(store: Store, session: SessionState, optimize: OptimizeState) {
   return {
     summary: store.counters(),
     agents: store.listAgents(),
@@ -94,6 +97,8 @@ function snapshot(store: Store, session: SessionState) {
     queue: buildAdjudicationCards(store),
     recentOrders: store.recentOrders(15),
     session: { running: session.running, error: session.error },
+    trainingExamples: store.trainingExampleCount(),
+    optimize: { running: optimize.running, error: optimize.error },
   };
 }
 
@@ -101,6 +106,14 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
   const { store } = cfg;
   const traderFactory = cfg.traderFactory ?? defaultTraderFactory;
   const session: SessionState = { running: false, error: null, last: null };
+  const optimize: OptimizeState = { running: false, error: null, last: null };
+  loadLatestOptimization(store);
+  const defaultGepaRunner = (): Promise<GepaReport> => {
+    const providers = buildProviders();
+    if (providers.length === 0) throw new Error("no provider API keys set");
+    return runGepa({ store, llm: providers[0].llm });
+  };
+  const gepaRunner = cfg.gepaRunner ?? defaultGepaRunner;
 
   const server = createServer((req, res) => {
     void route(req, res);
@@ -111,7 +124,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
     const method = req.method ?? "GET";
 
     try {
-      if (u === "/api/state" && method === "GET") return json(res, snapshot(store, session));
+      if (u === "/api/state" && method === "GET") return json(res, snapshot(store, session, optimize));
       if (u === "/api/queue" && method === "GET") return json(res, { cards: buildAdjudicationCards(store) });
 
       const hist = u.match(/^\/api\/history\/(.+)$/);
@@ -178,6 +191,40 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         });
       }
 
+      if (u === "/api/optimize" && method === "POST") {
+        if (!cfg.gepaRunner && store.trainingExampleCount() < 30) {
+          return json(res, { error: `need 30 adjudicated examples, have ${store.trainingExampleCount()}` }, 400);
+        }
+        if (optimize.running) return json(res, { error: "optimization already running" }, 409);
+        optimize.running = true;
+        optimize.error = null;
+        try {
+          const p = gepaRunner();
+          p.then(report => { optimize.last = report; })
+            .catch(err => {
+              optimize.error = String(err instanceof Error ? err.message : err);
+            })
+            .finally(() => { optimize.running = false; broadcast(); });
+          const settled = await Promise.race([p.then(() => "ok" as const), Promise.resolve("pending" as const)]);
+          if (settled === "ok") return json(res, { started: true, finished: true });
+          return json(res, { started: true });
+        } catch (err) {
+          optimize.running = false;
+          const status = err instanceof InsufficientExamplesError ? 400 : 500;
+          return json(res, { error: String(err instanceof Error ? err.message : err) }, status);
+        }
+      }
+
+      if (u === "/api/optimize" && method === "GET") {
+        return json(res, {
+          running: optimize.running,
+          error: optimize.error,
+          last: optimize.last,
+          history: store.listOptimizations(),
+          trainingExamples: store.trainingExampleCount(),
+        });
+      }
+
       // Static files. Default "/" -> index.html. Reject anything that escapes PUBLIC_DIR.
       if (method === "GET") {
         const rel = u === "/" ? "index.html" : u.slice(1);
@@ -203,13 +250,13 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
   let lastSent = "";
   function broadcast(): void {
     if (wss.clients.size === 0) return;
-    const payload = JSON.stringify(snapshot(store, session));
+    const payload = JSON.stringify(snapshot(store, session, optimize));
     if (payload === lastSent) return;
     lastSent = payload;
     for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.send(payload);
   }
   wss.on("connection", ws => {
-    ws.send(JSON.stringify(snapshot(store, session)));
+    ws.send(JSON.stringify(snapshot(store, session, optimize)));
   });
   const ticker = setInterval(broadcast, cfg.broadcastMs ?? 1000);
 

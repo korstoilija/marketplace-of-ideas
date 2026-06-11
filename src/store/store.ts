@@ -161,6 +161,30 @@ export class Store {
     return path;
   }
 
+  insertOptimization(o: { baseline: number; optimized: number; examplesUsed: number; holdoutSize: number; programJson: string }): void {
+    this.db.prepare(
+      "INSERT INTO optimizations (baseline, optimized, examples_used, holdout_size, program_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(o.baseline, o.optimized, o.examplesUsed, o.holdoutSize, o.programJson, Date.now());
+  }
+
+  listOptimizations(): Array<{ id: number; baseline: number; optimized: number; examplesUsed: number; holdoutSize: number; createdAt: number }> {
+    const rows = this.db.prepare(
+      "SELECT id, baseline, optimized, examples_used, holdout_size, created_at FROM optimizations ORDER BY id DESC",
+    ).all() as Array<{ id: number; baseline: number; optimized: number; examples_used: number; holdout_size: number; created_at: number }>;
+    return rows.map(r => ({ id: r.id, baseline: r.baseline, optimized: r.optimized, examplesUsed: r.examples_used, holdoutSize: r.holdout_size, createdAt: r.created_at }));
+  }
+
+  latestOptimization(): { programJson: string; createdAt: number } | null {
+    const r = this.db.prepare(
+      "SELECT program_json, created_at FROM optimizations ORDER BY id DESC LIMIT 1",
+    ).get() as { program_json: string; created_at: number } | undefined;
+    return r ? { programJson: r.program_json, createdAt: r.created_at } : null;
+  }
+
+  trainingExampleCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) n FROM training_examples").get() as { n: number }).n;
+  }
+
   close(): void { this.db.close(); }
 
   placeOrder(o: { claimId: string; agentId: string; side: Side; shares: number }): { cost: number; yesPrice: number } {

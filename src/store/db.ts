@@ -91,6 +91,15 @@ const TABLES: string[] = [
     outcome INTEGER NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS optimizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    baseline REAL NOT NULL,
+    optimized REAL NOT NULL,
+    examples_used INTEGER NOT NULL,
+    holdout_size INTEGER NOT NULL,
+    program_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 export function openDb(path: string): Db {

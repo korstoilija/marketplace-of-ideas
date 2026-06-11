@@ -108,6 +108,15 @@ function render(s) {
 
   $("feed").replaceChildren(...s.recentOrders.map(o =>
     el("div", {}, `${o.agentId} bought ${o.shares.toFixed(0)} ${o.side.toUpperCase()} on ${o.claimId} (cost ${o.cost.toFixed(1)})`)));
+
+  const need = 30;
+  const have = s.trainingExamples ?? 0;
+  $("runGepa").disabled = s.optimize.running || have < need;
+  $("gepaStatus").textContent = s.optimize.running
+    ? "Optimizing evaluator against your rulings…"
+    : (s.optimize.error
+        ? `Last run: ${s.optimize.error}`
+        : (have < need ? `${have}/${need} rulings collected — adjudicate more claims to enable.` : `${have} rulings ready.`));
 }
 
 document.addEventListener("click", async (e) => {
@@ -147,7 +156,7 @@ let pollTimer = null;
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => { $("conn").textContent = "live"; if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
-  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); };
+  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); loadGepaHistory(); };
   ws.onclose = () => {
     $("conn").textContent = "polling";
     if (!pollTimer) pollTimer = setInterval(refresh, 2000);
@@ -156,3 +165,24 @@ function connect() {
 }
 connect();
 refresh();
+
+$("runGepa").addEventListener("click", async () => {
+  $("runGepa").disabled = true;
+  const res = await fetch("/api/optimize", { method: "POST" });
+  if (!res.ok) $("gepaStatus").textContent = `Error: ${(await res.json()).error}`;
+  await loadGepaHistory();
+});
+
+async function loadGepaHistory() {
+  try {
+    const s = await (await fetch("/api/optimize")).json();
+    $("gepaHistory").replaceChildren(...s.history.map(h =>
+      el("tr", {},
+        el("td", {}, new Date(h.createdAt).toLocaleString()),
+        el("td", {}, h.baseline.toFixed(3)),
+        el("td", {}, h.optimized.toFixed(3)),
+        el("td", {}, String(h.examplesUsed + h.holdoutSize)),
+      )));
+  } catch { /* server gone */ }
+}
+loadGepaHistory();

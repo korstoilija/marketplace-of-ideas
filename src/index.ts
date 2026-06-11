@@ -7,3 +7,4 @@ export * from "./engine/harness.js";
 export * from "./engine/codegen.js";
 export * from "./server/cards.js";
 export * from "./server/service.js";
+export * from "./optimize/gepa.js";
