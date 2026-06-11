@@ -100,6 +100,26 @@ function defaultTraderFactory(count: number): ReturnType<TraderFactory> {
   return { traders, leafEvaluator, llm };
 }
 
+function buildContext(store: Store): string {
+  const s = store.counters();
+  const recentErrors = store.db.prepare(
+    "SELECT substr(stdout,1,80) as err FROM agent_iterations WHERE stdout LIKE '%ERROR%' ORDER BY id DESC LIMIT 3"
+  ).all() as Array<{ err: string }>;
+  const recentIdeas = store.db.prepare(
+    "SELECT id, title, status FROM ideas ORDER BY created_at DESC LIMIT 5"
+  ).all() as Array<{ id: string; title: string; status: string }>;
+  
+  return [
+    `MARKETPLACE STATE: ${s.ideas} ideas, ${s.claims} claims, ${s.openMarkets} open markets, ${s.resolvedMarkets} resolved.`,
+    `Recent ideas: ${recentIdeas.map(i => `${i.title} (${i.status})`).join("; ")}`,
+    recentErrors.length ? `Recent errors: ${recentErrors.map(e => e.err.slice(0,60)).join(" | ")}` : "No recent errors.",
+    `Active agents: ${store.listAgents().length}. Vault: ${store.listSessions?.().length ?? 0} sessions recorded.`,
+    "",
+    "You can explore this state with: ideas.list(), market.price(cid), evidence.list(cid), state().",
+    "Use these to examine the actual marketplace before proposing improvements.",
+  ].join("\n");
+}
+
 function json(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -323,7 +343,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         catch (err) { return json(res, { error: String(err instanceof Error ? err.message : err) }, 400); }
 
         session.start(runSession({
-          store, topic,
+          store, topic: topic + "\n\n" + buildContext(store),
           traders: setup.traders,
           leafEvaluator: setup.leafEvaluator,
           llm: setup.llm,
