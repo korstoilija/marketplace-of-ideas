@@ -86,7 +86,6 @@ async function drawSpark(svg) {
 }
 
 let wasOptimizing = false;
-let wasSessionRunning = false;
 
 function render(s) {
   $("st-ideas").textContent = s.summary.ideas;
@@ -112,7 +111,6 @@ function render(s) {
   $("feed").replaceChildren(...s.recentOrders.map(o =>
     el("div", {}, `${o.agentId} bought ${o.shares.toFixed(0)} ${o.side.toUpperCase()} on ${o.claimId} (cost ${o.cost.toFixed(1)})`)));
 
-  // GEPA evaluator state
   const need = s.minExamples ?? 30;
   const have = s.trainingExamples ?? 0;
   $("runGepa").disabled = s.optimize.running || have < need;
@@ -122,7 +120,6 @@ function render(s) {
         ? `Last run: ${s.optimize.error}`
         : (have < need ? `${have}/${need} rulings collected — adjudicate more claims to enable.` : `${have} rulings ready.`));
 
-  // GEPA history (from snapshot, no extra fetch)
   if (s.optimize.history) {
     $("gepaHistory").replaceChildren(...s.optimize.history.map(h =>
       el("tr", {},
@@ -133,11 +130,9 @@ function render(s) {
       )));
   }
 
-  // Session transition — on completion, show what happened
-  if (wasOptimizing && !s.optimize.running) {} // GEPA already handled above
+  if (wasOptimizing && !s.optimize.running) {}
   wasOptimizing = s.optimize.running;
 
-  // Sessions list (from snapshot, no extra fetch)
   if (s.sessions?.length) {
     $("sessions").replaceChildren(...s.sessions.map(x =>
       el("div", { class: "sessrow", "data-session": String(x.id) },
@@ -147,7 +142,6 @@ function render(s) {
       )));
   }
 
-  // Metrics (from snapshot, no extra fetch)
   if (s.metrics?.adjudicated) {
     const m = s.metrics;
     const rows = [
@@ -163,7 +157,6 @@ function render(s) {
     $("metrics").replaceChildren(...rows, cal);
   }
 
-  // Session completion — show result in status
   if (s.session.lastRuns?.length) {
     const summaries = s.session.lastRuns.map(r => `${r.agentId}: ${r.iterations} iters`).join(", ");
     $("sessionStatus").textContent = `Last session: ${summaries}` + (s.session.error ? ` (${s.session.error})` : "");
@@ -180,7 +173,6 @@ document.addEventListener("click", async (e) => {
     body: JSON.stringify({ claimId: btn.dataset.claim, ruling: btn.dataset.ruling }),
   });
   await refresh();
-  await loadMetrics();
 });
 
 $("sessionForm").addEventListener("submit", async (e) => {
@@ -201,22 +193,8 @@ $("sessionForm").addEventListener("submit", async (e) => {
 });
 
 async function refresh() {
-  try { render(await (await fetch("/api/state")).json()); } catch { /* server gone; ws/poll will retry */ }
+  try { render(await (await fetch("/api/state")).json()); } catch { /* server gone */ }
 }
-
-let pollTimer = null;
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => { $("conn").textContent = "live"; if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
-  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); };
-  ws.onclose = () => {
-    $("conn").textContent = "polling";
-    if (!pollTimer) pollTimer = setInterval(refresh, 2000);
-    setTimeout(connect, 3000);
-  };
-}
-connect();
-refresh();
 
 $("runGepa").addEventListener("click", async () => {
   $("runGepa").disabled = true;
@@ -232,7 +210,6 @@ $("runGepa").addEventListener("click", async () => {
   }
 });
 
-// Transcript viewer: click a session row to see agent code
 document.addEventListener("click", async (e) => {
   const row = e.target.closest(".sessrow");
   if (!row) return;
@@ -265,6 +242,3 @@ function connect() {
 }
 connect();
 refresh();
-      )),
-  );
-});
