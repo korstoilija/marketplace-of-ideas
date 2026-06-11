@@ -78,6 +78,7 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
         onIteration,
         recordIteration,
         recall: cfg.recall,
+        target: cfg.target,
       }).run(),
     ),
   );

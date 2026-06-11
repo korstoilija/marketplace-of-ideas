@@ -64,6 +64,26 @@ export function buildTemplate(title: string, claims: string[]): string {
 const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
 print("Seeded " + claimIds.length + " claims.");
 
+// Step 0: If target is available, read a DIVERSE sample of files for grounded evidence
+if (typeof target !== "undefined") {
+  const allFiles = target.list();
+  // Pick files from different directories for diversity
+  const dirs = [...new Set(allFiles.map(f => f.path.split("/")[0]))];
+  const sample = [];
+  for (const dir of dirs.slice(0, 4)) {
+    const dirFiles = allFiles.filter(f => f.path.startsWith(dir + "/")).slice(0, 2);
+    sample.push(...dirFiles);
+  }
+  if (sample.length === 0) sample.push(...allFiles.slice(0, 8));
+  for (const f of sample) {
+    try {
+      const chunk = target.read(f.path, 0, 2000);
+      print("TARGET: " + f.path + " (" + chunk.length + " chars)");
+      evidence.submit(claimIds[0], "target:" + f.path + ": " + chunk.slice(0, 300), "supporting");
+    } catch(e) { print("target read failed: " + f.path); }
+  }
+}
+
 // Step 1: Gather evidence for each claim — BOTH directions, stance decided by content.
 // recall() is model knowledge, not retrieval: submit it as the stance you asked for,
 // and ask for both sides so the market is not fed one-sided fabrication.
