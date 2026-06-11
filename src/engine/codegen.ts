@@ -36,7 +36,7 @@ const{ideaId,claimIds}=ideas.propose({title:"Your Topic Here",summary:"Evaluatin
 evidence.submit(claimIds[0],"Supporting evidence for claim 1","supporting");
 evidence.submit(claimIds[0],"Counter evidence for claim 1","counter");
 for(const cid of claimIds){const p=market.price(cid);const shares=Math.max(5,Math.abs(p-0.5)*200);if(p>0.55)market.buyYes(cid,shares);else if(p<0.45)market.buyNo(cid,shares);else print(cid+" price near 0.5, no trade")}
-Final={summary:"Seeded market",claims:claimIds.length}
+print("Seeded " + claimIds.length + " claims — market is live!");
 
 SUBSEQUENT ITERATIONS — explore freely:
 - Read market prices with market.price(claimId)
@@ -80,8 +80,7 @@ for (const cid of claimIds) {
   else if (p < 0.45) market.buyNo(cid, shares);
   else print(cid + " price:" + p.toFixed(2) + " (no trade)");
 }
-print("Proposed " + claimIds.length + " claims");
-Final = { summary: "Done", claims: claimIds.length };`;
+print("Seeded " + claimIds.length + " claims — market is live!");`;
 }
 
 /** Template-first code generator: first iteration uses contentSig + buildTemplate.
