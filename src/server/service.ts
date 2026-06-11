@@ -410,7 +410,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         if (items.length === 0) return json(res, { message: "no new sources to process" });
         const result = await tier1Decompose(store, items, providers[0].llm, budget);
         _broadcast();
-        return json(res, { ...result, sourcesScanned: items.length });
+        return json(res, { sourcesScanned: items.length, tier1Count: result.tier1Count, escalatedCount: result.escalated.length, killedByZ: result.killedByZ, killedByCoherence: result.killedByCoherence });
       }
 
       // Vault

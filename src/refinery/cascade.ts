@@ -7,7 +7,7 @@ import { BudgetGuard } from "../engine/budget.js";
 import { ax } from "@ax-llm/ax";
 
 const tier1Sig = ax(
-  "text:string -> claims_json:string \"JSON array of {text, confidence}\", coherence_score:number",
+  "sourceText:string -> claims_json:string \"JSON array of {text, confidence}\", coherence_score:number",
 );
 
 export interface CascadeResult {
@@ -79,7 +79,7 @@ export async function tier1Decompose(
     tier1Count++;
     let claimsJson = "[]", coherenceScore = 0.5, confidence = 0.5;
     try {
-      const res = await tier1Sig.forward(llm, { text: item.text.slice(0, 3000) });
+      const res = await tier1Sig.forward(llm, { sourceText: item.text.slice(0, 3000) });
       claimsJson = String(res.claims_json ?? "[]");
       coherenceScore = Math.max(0, Math.min(1, Number(res.coherence_score ?? 0.5)));
 

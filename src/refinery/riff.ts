@@ -3,7 +3,7 @@ import type { Store } from "../store/store.js";
 import type { AxLLM } from "../engine/codegen.js";
 
 const riffSig = ax(
-  "text:string, context:string -> rulings_json:string \"JSON array of {claimId, confidence, reason, quote}\", claims_json:string \"JSON array of {text, evidence}\", taste_text:string \"free-text taste observation\"",
+  "riffText:string, riffContext:string -> rulings_json:string \"JSON array of {claimId, confidence, reason, quote}\", claims_json:string \"JSON array of {text, evidence}\", taste_text:string \"free-text taste observation\"",
 );
 
 export interface Interpretation {
@@ -37,7 +37,7 @@ export async function compileRiff(
   const context = contextItems.join("\n").slice(0, 3000);
 
   try {
-    const res = await riffSig.forward(llm, { text: riffText.slice(0, 2000), context });
+    const res = await riffSig.forward(llm, { riffText: riffText.slice(0, 2000), riffContext: context });
 
     // Parse rulings
     const rulingsJson = String(res.rulings_json ?? "[]");
