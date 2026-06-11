@@ -162,8 +162,9 @@ function render(s) {
     $("sessionStatus").textContent = `Last session: ${summaries}` + (s.session.error ? ` (${s.session.error})` : "");
   }
 
-  // ALL LOGS — every iteration, every error
+  // ALL LOGS — auto-scroll to newest
   if (s.allLogs?.length) {
+    const wasAtBottom = $("agentLog").scrollHeight - $("agentLog").scrollTop - $("agentLog").clientHeight < 50;
     $("agentLog").replaceChildren(...s.allLogs.map(it =>
       el("div", { style: "font-size:11px;margin:2px 0;padding:4px 6px;border-left:3px solid " + (it.hasError ? "var(--red)" : it.hasFinal ? "var(--green)" : "var(--amber)") + ";background:var(--panel2);border-radius:0 4px 4px 0" },
         el("div", { style: "color:var(--accent);font-weight:600" },
@@ -171,6 +172,7 @@ function render(s) {
         el("pre", { style: "margin:2px 0;color:var(--dim);max-height:80px;overflow:hidden;white-space:pre-wrap" }, it.code),
         el("pre", { style: "margin:2px 0;color:" + (it.hasError ? "var(--red)" : "var(--dim)") + ";max-height:80px;overflow:hidden;white-space:pre-wrap" }, it.stdout || "(no output)"),
       )));
+    if (wasAtBottom) $("agentLog").scrollTop = $("agentLog").scrollHeight;
   } else if (s.session.running) {
     $("agentLog").replaceChildren(el("p", { class: "empty" }, "Waiting..."));
   } else {
