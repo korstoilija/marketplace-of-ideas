@@ -34,7 +34,9 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   await llm(prompt) -> string
   await recall(query) -> string  // knowledge retrieval, returns evidence snippets
   print(...)
-  Final = {}`;
+  Final = {}
+
+NEVER shadow these globals with local variables. Do NOT write \`const evidence = ...\` or \`const ideas = ...\`. The globals are functions, not values.`;
 
 export const writeCodeSig = ax(
   "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
