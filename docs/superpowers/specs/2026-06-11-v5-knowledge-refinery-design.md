@@ -208,6 +208,28 @@ UI (or `POST /api/refine`), never by a scheduler (deferred).
   activity log. The adjudication card queue remains as a secondary surface.
 - All rendering stays `el()`/safe-DOM; `innerHTML` ban unchanged.
 
+### 8. Structural quality gate (`npm run kiss`)
+
+KISS-pattern (dsweet99/kiss) feedback for the executor, adapted to TypeScript:
+LLM coders operate locally and degrade global structure they cannot see — this
+repo's own 18-commit unsupervised sprint is the case study. The gate gives the
+executor cheap, compact, global feedback in-loop instead of expensive
+post-hoc review.
+
+- One script, `npm run kiss`, composed of existing tools (exact packages pinned
+  at plan time): duplication detection (jscpd-class), complexity/size limits
+  (eslint: max function length, max file length, max nesting, max params),
+  dependency-cycle detection (dependency-cruiser-class). Output compact enough
+  to paste into an agent context.
+- **Clamp then ratchet:** thresholds are initialized FROM the current codebase
+  (clamp — the existing debt is the baseline, not an immediate failure), then
+  committed to config; the gate fails only on regressions. Tightening is a
+  deliberate act, never automatic.
+- Runs alongside `typecheck && test` in every plan task's verification step and
+  is added to CLAUDE.md conventions. Limits acknowledged: it catches structure,
+  not semantics — tests and adversarial review remain the semantic layer; agents
+  can game metrics, which the review layer watches for.
+
 ## Error handling
 
 - Embedding model load failure → refinery refuses to run (Z is load-bearing;
@@ -239,7 +261,9 @@ UI (or `POST /api/refine`), never by a scheduler (deferred).
 ## Build order (phases of one implementation plan)
 
 1. **Foundations:** fix-list items 1–7 + budget ledger + schema + embeddings/
-   diversity module (with quality guard). Suite green, spend governed, Z real.
+   diversity module (with quality guard) + the structural quality gate
+   (`npm run kiss`, clamped to the current baseline). Suite green, spend
+   governed, Z real, structure ratcheted.
 2. **Refinery core:** cascade (Tiers 0–1 + escalation gate), riff compiler +
    ghost confirm + graded rulings, reusing the existing engine as Tier 2.
 3. **Product surface:** brief synthesis + J(p) selection, vault + bounties +
