@@ -119,6 +119,22 @@ interface OptimizeState {
 }
 
 function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: OptimizeState) {
+  // Live transcript: last 5 agent iterations for observability during sessions
+  const sessions = store.listSessions();
+  const liveSession = sessions.find(s => !s.endedAt);
+  const liveTranscript = liveSession
+    ? store.getSessionIterations(liveSession.id).slice(-5).map(it => ({
+        agentId: it.agentId,
+        depth: it.depth,
+        iteration: it.iteration,
+        code: it.code.slice(0, 200),
+        stdout: it.stdout.slice(0, 200),
+        hasFinal: it.hasFinal,
+        timedOut: it.timedOut,
+        hasError: it.stdout.includes("ERROR") || it.stdout.includes("ReferenceError") || it.stdout.includes("TypeError"),
+      }))
+    : [];
+
   return {
     summary: store.counters(),
     agents: store.listAgents(),
@@ -138,6 +154,7 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
     })),
     queue: buildAdjudicationCards(store),
     recentOrders: store.recentOrders(15),
+    liveTranscript,
     sessions: store.listSessions().slice(0, 10),
     metrics: computeMetrics(store),
     session: {
