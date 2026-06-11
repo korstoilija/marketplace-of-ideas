@@ -77,24 +77,19 @@ const PERSONAS = [
 
 function defaultTraderFactory(count: number): ReturnType<TraderFactory> {
   const providers = buildProviders();
-  const cliTraders = (process.env["MP_CLI_TRADERS"] ?? "").split(",").map(s => s.trim()).filter(Boolean) as Array<"claude" | "codex">;
+  const cliTraders = (process.env["MP_CLI_TRADERS"] ?? "").split(",").map(s => s.trim()).filter((s): s is "claude" | "codex" => s === "claude" || s === "codex");
   if (providers.length === 0 && cliTraders.length === 0) throw new Error("no provider API keys set and no CLI traders enabled");
+  
+  const roster = cliTraders.length > 0 
+    ? [...providers.map(p => ({ name: p.name, makeGen: () => makeCodeGenerator(p.llm) })), ...cliTraders.map(k => ({ name: k, makeGen: () => makeCliCodeGenerator(k) }))]
+    : providers.map(p => ({ name: p.name, makeGen: () => makeCodeGenerator(p.llm) }));
+  
   const traders: TraderSetup[] = Array.from({ length: count }, (_, i) => {
-    const pool = providers.length > 0 ? i % providers.length : 0;
-    if (i < providers.length) {
-      const p = providers[pool];
-      return {
-        agentId: `${p.name}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
-        persona: PERSONAS[i % PERSONAS.length],
-        codegen: makeCodeGenerator(p.llm),
-      };
-    }
-    const ci = (i - providers.length) % cliTraders.length;
-    const kind = cliTraders[ci];
+    const r = roster[i % roster.length];
     return {
-      agentId: `${kind}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
+      agentId: `${r.name}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
       persona: PERSONAS[i % PERSONAS.length],
-      codegen: makeCliCodeGenerator(kind),
+      codegen: r.makeGen(),
     };
   });
   const primaryLlm = providers.length > 0 ? providers[0].llm : null;
