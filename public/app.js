@@ -140,12 +140,15 @@ function render(s) {
   wasOptimizing = s.optimize.running;
 
   if (s.sessions?.length) {
-    $("sessions").replaceChildren(...s.sessions.map(x =>
-      el("div", { class: "sessrow", "data-session": String(x.id) },
-        el("div", {}, x.topic),
-        el("div", {}, `${x.agents} agents · ${x.iterations} iterations`),
-        el("div", {}, x.endedAt ? "done" : "running"),
-      )));
+    $("sessions").replaceChildren(
+      el("div", { style: "margin-bottom:6px" },
+        el("a", { href: "/api/export", style: "font-size:12px;color:var(--accent)" }, "Export all as JSONL")),
+      ...s.sessions.map(x =>
+        el("div", { class: "sessrow", "data-session": String(x.id) },
+          el("div", {}, x.topic),
+          el("div", {}, `${x.agents} agents · ${x.iterations} iterations`),
+          el("div", {}, x.endedAt ? "done" : "running"),
+        )));
   }
 
   if (s.metrics?.adjudicated) {

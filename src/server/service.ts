@@ -208,6 +208,16 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
       if (u === "/api/queue" && method === "GET") return json(res, { cards: buildAdjudicationCards(store) });
       if (u === "/api/metrics" && method === "GET") return json(res, computeMetrics(store));
 
+      if (u === "/api/export" && method === "GET") {
+        const sessionId = new URL(req.url ?? "/", "http://x").searchParams.get("session");
+        let rows = sessionId
+          ? store.getSessionIterations(Number(sessionId))
+          : (() => { const all: ReturnType<typeof store.getSessionIterations> = []; for (const s of store.listSessions().slice(0, 10)) all.push(...store.getSessionIterations(s.id)); return all; })();
+        const jsonl = rows.map(r => JSON.stringify({ agentId: r.agentId, depth: r.depth, iteration: r.iteration, code: r.code, stdout: r.stdout, hasFinal: r.hasFinal })).join("\n");
+        res.writeHead(200, { "Content-Type": "application/x-jsonlines", "Content-Disposition": "attachment; filename=transcripts.jsonl" });
+        return void res.end(jsonl);
+      }
+
       if (u === "/api/sessions" && method === "GET") {
         return json(res, { sessions: store.listSessions() });
       }
