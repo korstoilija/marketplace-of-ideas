@@ -7,7 +7,7 @@ import { buildAdjudicationCards } from "./cards.js";
 import { runSession, type SessionResult } from "../engine/harness.js";
 import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
-import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport } from "../optimize/gepa.js";
+import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -34,6 +34,35 @@ export interface Service {
   port: number;
   server: Server;
   close(): Promise<void>;
+}
+
+/** Shared lifecycle for async background jobs: mutual exclusion, error capture, broadcast. */
+class AsyncJob<T> {
+  running = false;
+  error: string | null = null;
+  last: T | null = null;
+  constructor(private broadcast: () => void) {}
+
+  /** Start a job. Returns false if already running. The promise chain sets flags. */
+  start(promise: Promise<T>, onSettled?: (result: T | null, error: string | null) => void): boolean {
+    if (this.running) return false;
+    this.running = true;
+    this.error = null;
+    promise
+      .then(result => {
+        this.last = result;
+        onSettled?.(result, null);
+      })
+      .catch(err => {
+        this.error = String(err instanceof Error ? err.message : err);
+        onSettled?.(null, this.error);
+      })
+      .finally(() => {
+        this.running = false;
+        this.broadcast();
+      });
+    return true;
+  }
 }
 
 const PERSONAS = [
@@ -73,10 +102,12 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-interface SessionState { running: boolean; error: string | null; last: SessionResult | null }
-interface OptimizeState { running: boolean; error: string | null; last: GepaReport | null }
+interface OptimizeState {
+  job: AsyncJob<GepaReport>;
+  trainingExamples: number;
+}
 
-function snapshot(store: Store, session: SessionState, optimize: OptimizeState) {
+function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: OptimizeState) {
   return {
     summary: store.counters(),
     agents: store.listAgents(),
@@ -97,23 +128,28 @@ function snapshot(store: Store, session: SessionState, optimize: OptimizeState) 
     queue: buildAdjudicationCards(store),
     recentOrders: store.recentOrders(15),
     session: { running: session.running, error: session.error },
-    trainingExamples: store.trainingExampleCount(),
-    optimize: { running: optimize.running, error: optimize.error },
+    trainingExamples: optimize.trainingExamples,
+    minExamples: MIN_EXAMPLES,
+    optimize: { running: optimize.job.running, error: optimize.job.error },
   };
 }
 
 export async function startService(cfg: ServiceConfig): Promise<Service> {
   const { store } = cfg;
   const traderFactory = cfg.traderFactory ?? defaultTraderFactory;
-  const session: SessionState = { running: false, error: null, last: null };
-  const optimize: OptimizeState = { running: false, error: null, last: null };
   loadLatestOptimization(store);
+
+  let _broadcast: () => void;
+  const session = new AsyncJob<SessionResult>(() => _broadcast?.());
+  const optimize = new AsyncJob<GepaReport>(() => _broadcast?.());
+
   const defaultGepaRunner = (): Promise<GepaReport> => {
     const providers = buildProviders();
     if (providers.length === 0) throw new Error("no provider API keys set");
     return runGepa({ store, llm: providers[0].llm });
   };
   const gepaRunner = cfg.gepaRunner ?? defaultGepaRunner;
+  const optimizeState: OptimizeState = { job: optimize, trainingExamples: store.trainingExampleCount() };
 
   const server = createServer((req, res) => {
     void route(req, res);
@@ -124,7 +160,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
     const method = req.method ?? "GET";
 
     try {
-      if (u === "/api/state" && method === "GET") return json(res, snapshot(store, session, optimize));
+      if (u === "/api/state" && method === "GET") return json(res, snapshot(store, session, optimizeState));
       if (u === "/api/queue" && method === "GET") return json(res, { cards: buildAdjudicationCards(store) });
 
       const hist = u.match(/^\/api\/history\/(.+)$/);
@@ -141,12 +177,14 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         }
         if (ruling !== "true" && ruling !== "false") return json(res, { error: "ruling must be true|false|skip" }, 400);
         store.applyAdjudication(claimId, ruling === "true");
-        broadcast();
+        optimizeState.trainingExamples = store.trainingExampleCount();
+        _broadcast();
         return json(res, { ok: true, claimId, outcome: ruling });
       }
 
       if (u === "/api/session" && method === "POST") {
         if (session.running) return json(res, { error: "a session is already running" }, 409);
+        if (optimize.running) return json(res, { error: "optimization in progress — wait for it to finish" }, 409);
         const body = await readBody(req);
         const topic = String(body["topic"] ?? "").trim();
         if (!topic) return json(res, { error: "topic required" }, 400);
@@ -157,27 +195,15 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         try { setup = traderFactory(count); }
         catch (err) { return json(res, { error: String(err instanceof Error ? err.message : err) }, 400); }
 
-        session.running = true;
-        session.error = null;
-        void runSession({
-          store,
-          topic,
+        session.start(runSession({
+          store, topic,
           traders: setup.traders,
           leafEvaluator: setup.leafEvaluator,
           llm: setup.llm,
-          maxIterations,
-          maxDepth: 1,
-          maxSubAgentCalls: 3,
-          sandboxTimeoutMs: 30_000,
-          stallIterations: 10,
-        }).then(result => {
-          session.last = result;
-          session.error = result.failures.map(f => `${f.agentId}: ${f.error}`).join("; ") || null;
-        }).catch(err => {
-          session.error = String(err instanceof Error ? err.message : err);
-        }).finally(() => {
-          session.running = false;
-          broadcast();
+          maxIterations, maxDepth: 1, maxSubAgentCalls: 3,
+          sandboxTimeoutMs: 30_000, stallIterations: 10,
+        }), (result, error) => {
+          if (result) session.error = result.failures.map(f => `${f.agentId}: ${f.error}`).join("; ") || null;
         });
 
         return json(res, { started: true, traders: setup.traders.map(t => t.agentId) });
@@ -192,27 +218,15 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
       }
 
       if (u === "/api/optimize" && method === "POST") {
-        if (!cfg.gepaRunner && store.trainingExampleCount() < 30) {
-          return json(res, { error: `need 30 adjudicated examples, have ${store.trainingExampleCount()}` }, 400);
-        }
+        if (session.running) return json(res, { error: "session in progress — wait for it to finish" }, 409);
         if (optimize.running) return json(res, { error: "optimization already running" }, 409);
-        optimize.running = true;
-        optimize.error = null;
-        try {
-          const p = gepaRunner();
-          p.then(report => { optimize.last = report; })
-            .catch(err => {
-              optimize.error = String(err instanceof Error ? err.message : err);
-            })
-            .finally(() => { optimize.running = false; broadcast(); });
-          const settled = await Promise.race([p.then(() => "ok" as const), Promise.resolve("pending" as const)]);
-          if (settled === "ok") return json(res, { started: true, finished: true });
-          return json(res, { started: true });
-        } catch (err) {
-          optimize.running = false;
-          const status = err instanceof InsufficientExamplesError ? 400 : 500;
-          return json(res, { error: String(err instanceof Error ? err.message : err) }, status);
+        // Precheck: only for the default (production) runner. Injected runners are test seams.
+        if (!cfg.gepaRunner && store.trainingExampleCount() < MIN_EXAMPLES) {
+          return json(res, { error: `need ${MIN_EXAMPLES} adjudicated examples, have ${store.trainingExampleCount()}` }, 400);
         }
+
+        const started = optimize.start(gepaRunner());
+        return json(res, { started });
       }
 
       if (u === "/api/optimize" && method === "GET") {
@@ -221,11 +235,11 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           error: optimize.error,
           last: optimize.last,
           history: store.listOptimizations(),
-          trainingExamples: store.trainingExampleCount(),
+          trainingExamples: optimizeState.trainingExamples,
+          minExamples: MIN_EXAMPLES,
         });
       }
 
-      // Static files. Default "/" -> index.html. Reject anything that escapes PUBLIC_DIR.
       if (method === "GET") {
         const rel = u === "/" ? "index.html" : u.slice(1);
         const full = normalize(join(PUBLIC_DIR, rel));
@@ -245,28 +259,26 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
     }
   }
 
-  // WebSocket: push snapshots while clients are connected and state changes.
   const wss = new WebSocketServer({ server, path: "/ws" });
   let lastSent = "";
-  function broadcast(): void {
+  _broadcast = () => {
     if (wss.clients.size === 0) return;
-    const payload = JSON.stringify(snapshot(store, session, optimize));
+    const payload = JSON.stringify(snapshot(store, session, optimizeState));
     if (payload === lastSent) return;
     lastSent = payload;
     for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.send(payload);
-  }
+  };
   wss.on("connection", ws => {
-    ws.send(JSON.stringify(snapshot(store, session, optimize)));
+    ws.send(JSON.stringify(snapshot(store, session, optimizeState)));
   });
-  const ticker = setInterval(broadcast, cfg.broadcastMs ?? 1000);
+  const ticker = setInterval(_broadcast, cfg.broadcastMs ?? 1000);
 
   await new Promise<void>(resolve => server.listen(cfg.port, "127.0.0.1", resolve));
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : cfg.port;
 
   return {
-    port,
-    server,
+    port, server,
     close: () => new Promise<void>((resolve) => {
       clearInterval(ticker);
       wss.close();

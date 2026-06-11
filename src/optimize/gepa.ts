@@ -3,6 +3,8 @@ import type { Store } from "../store/store.js";
 import { evaluateClaimSig, type AxLLM } from "../engine/codegen.js";
 
 /** One human ruling, flattened into evaluateClaimSig's input fields. `outcome` rides along for the metric. */
+export const MIN_EXAMPLES = 30;
+
 export interface GepaExample {
   claimText: string;
   supportingEvidence: string;
@@ -52,18 +54,17 @@ export class InsufficientExamplesError extends Error {
   }
 }
 
-/** Mean metric score of the CURRENT evaluateClaimSig on the holdout. */
+/** Mean metric score of the CURRENT evaluateClaimSig on the holdout. Parallelizes LLM calls. */
 export async function scoreOnHoldout(llm: AxLLM, holdout: GepaExample[]): Promise<number> {
-  let sum = 0;
-  for (const ex of holdout) {
-    const res = await evaluateClaimSig.forward(llm, {
+  const results = await Promise.all(holdout.map(ex =>
+    evaluateClaimSig.forward(llm, {
       claimText: ex.claimText,
       supportingEvidence: ex.supportingEvidence,
       counterEvidence: ex.counterEvidence,
-    });
-    sum += await gepaMetric({ prediction: res, example: ex });
-  }
-  return holdout.length ? sum / holdout.length : 0;
+    }).then(res => gepaMetric({ prediction: res, example: ex })),
+  ));
+  if (results.length === 0) return 0;
+  return results.reduce((a, b) => a + b, 0) / results.length;
 }
 
 export interface RunGepaOptions {
@@ -77,7 +78,7 @@ export interface RunGepaOptions {
 }
 
 export async function runGepa(opts: RunGepaOptions): Promise<GepaReport> {
-  const minExamples = opts.minExamples ?? 30;
+  const minExamples = opts.minExamples ?? MIN_EXAMPLES;
   const examples = toExamples(opts.store);
   if (examples.length < minExamples) throw new InsufficientExamplesError(examples.length, minExamples);
 

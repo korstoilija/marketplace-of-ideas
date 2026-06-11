@@ -109,7 +109,7 @@ function render(s) {
   $("feed").replaceChildren(...s.recentOrders.map(o =>
     el("div", {}, `${o.agentId} bought ${o.shares.toFixed(0)} ${o.side.toUpperCase()} on ${o.claimId} (cost ${o.cost.toFixed(1)})`)));
 
-  const need = 30;
+  const need = s.minExamples ?? 30;
   const have = s.trainingExamples ?? 0;
   $("runGepa").disabled = s.optimize.running || have < need;
   $("gepaStatus").textContent = s.optimize.running
@@ -156,7 +156,7 @@ let pollTimer = null;
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onopen = () => { $("conn").textContent = "live"; if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
-  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); loadGepaHistory(); };
+  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); };
   ws.onclose = () => {
     $("conn").textContent = "polling";
     if (!pollTimer) pollTimer = setInterval(refresh, 2000);
@@ -168,8 +168,16 @@ refresh();
 
 $("runGepa").addEventListener("click", async () => {
   $("runGepa").disabled = true;
-  const res = await fetch("/api/optimize", { method: "POST" });
-  if (!res.ok) $("gepaStatus").textContent = `Error: ${(await res.json()).error}`;
+  try {
+    const res = await fetch("/api/optimize", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Error ${res.status}`;
+      try { const body = await res.json(); if (body.error) msg = body.error; } catch {}
+      $("gepaStatus").textContent = msg;
+    }
+  } catch (err) {
+    $("gepaStatus").textContent = `Network error: ${err.message || err}`;
+  }
   await loadGepaHistory();
 });
 
