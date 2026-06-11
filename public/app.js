@@ -54,11 +54,52 @@ function sparkSvg(claimId) {
 }
 
 function renderMarkets(ideas) {
-  const blocks = ideas.flatMap(idea => [
+  const pending = ideas.filter(i => i.status === "proposed");
+  const rejected = ideas.filter(i => i.status === "rejected");
+  const resolved = ideas.filter(i => 
+    i.status === "accepted" && i.claims.length > 0 && i.claims.every(c => c.resolution));
+  const active = ideas.filter(i => 
+    i.status === "accepted" && !(i.claims.length > 0 && i.claims.every(c => c.resolution)));
+
+  const blocks = [];
+
+  if (pending.length) {
+    blocks.push(el("div", { class: "idea-section" },
+      el("h3", { style: "color:var(--amber);font-size:12px;text-transform:uppercase;margin:10px 0 4px" }, `Pending (${pending.length})`),
+      ...pending.flatMap(idea => renderIdeaBlocks(idea)),
+    ));
+  }
+
+  if (active.length) {
+    blocks.push(el("div", { class: "idea-section" },
+      el("h3", { style: "color:var(--green);font-size:12px;text-transform:uppercase;margin:10px 0 4px" }, `Active (${active.length})`),
+      ...active.flatMap(idea => renderIdeaBlocks(idea)),
+    ));
+  }
+
+  if (resolved.length) {
+    blocks.push(el("div", { class: "idea-section" },
+      el("h3", { style: "color:var(--accent);font-size:12px;text-transform:uppercase;margin:10px 0 4px" }, `Resolved (${resolved.length})`),
+      ...resolved.flatMap(idea => renderIdeaBlocks(idea)),
+    ));
+  }
+
+  if (rejected.length) {
+    blocks.push(el("div", { class: "idea-section" },
+      el("h3", { style: "color:var(--red);font-size:12px;text-transform:uppercase;margin:10px 0 4px" }, `Rejected (${rejected.length})`),
+      ...rejected.slice(0, 5).flatMap(idea => renderIdeaBlocks(idea)),
+    ));
+  }
+
+  $("markets").replaceChildren(...(blocks.length ? blocks : [el("p", { class: "empty" }, "No ideas yet. Launch a session.")]));
+}
+
+function renderIdeaBlocks(idea) {
+  return [
     el("div", { class: "idea-title" },
       idea.title,
-      idea.status === "proposed" ? el("span", { style: "color:var(--amber);font-size:11px;margin-left:6px" }, "pending") : null,
-      idea.status === "rejected" ? el("span", { style: "color:var(--red);font-size:11px;margin-left:6px" }, "rejected") : null,
+      idea.status === "proposed" ? el("span", { style: "color:var(--amber);font-size:11px;margin-left:6px" }, "awaiting approval") : null,
+      idea.status === "rejected" ? el("span", { style: "color:var(--red);font-size:11px;margin-left:6px" }, "dismissed") : null,
     ),
     idea.status === "proposed" ? el("div", { style: "display:flex;gap:6px;margin:4px 0" },
       el("button", { class: "rule-true", "data-approve": idea.id }, "Approve"),
@@ -76,8 +117,7 @@ function renderMarkets(ideas) {
       void drawSpark(spark);
       return row;
     }),
-  ]);
-  $("markets").replaceChildren(...(blocks.length ? blocks : [el("p", { class: "empty" }, "No ideas yet. Launch a session.")]));
+  ];
 }
 
 async function drawSpark(svg) {
