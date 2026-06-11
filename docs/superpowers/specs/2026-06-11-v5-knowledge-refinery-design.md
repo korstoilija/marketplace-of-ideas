@@ -1,7 +1,7 @@
 # v5: The Knowledge Refinery — Design
 
 **Date:** 2026-06-11
-**Status:** Approved (pending final spec review)
+**Status:** SUPERSEDED by 2026-06-11-v6-enrichment-engine-design.md
 **Supersedes the framing of:** 2026-06-10-marketplace-of-ideas-ax-design.md (the machinery it describes remains; its goal statement is revised here)
 
 ## Purpose — the inversion
