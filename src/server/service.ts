@@ -188,6 +188,7 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
     trainingExamples: optimize.trainingExamples,
     minExamples: MIN_EXAMPLES,
     vault: { entries: listVault(store) },
+    riff: { pending: (store.db.prepare("SELECT id, kind, claim_id, confidence, reason, quote, status FROM interpretations WHERE status='pending' ORDER BY id DESC LIMIT 10").all() as Array<Record<string, unknown>>).map(r => ({ id: r.id, kind: r.kind, claimId: r.claim_id, confidence: r.confidence, reason: r.reason, quote: r.quote, status: r.status })) },
     optimize: {
       running: optimize.job.running,
       error: optimize.job.error,

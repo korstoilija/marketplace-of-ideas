@@ -140,6 +140,7 @@ async function drawSpark(svg) {
 }
 
 let wasOptimizing = false;
+let wasSessionRunning = false;
 
 function render(s) {
   $("st-ideas").textContent = s.summary.ideas;
@@ -151,6 +152,13 @@ function render(s) {
   $("sessionStatus").textContent = s.session.running
     ? "Session running — agents are writing code and trading…"
     : (s.session.error ? `Last session issues: ${s.session.error}` : "");
+  // Session completed? Refresh ideas + sessions
+  if (wasSessionRunning && !s.session.running) {
+    // State machine transition: session just completed
+    renderMarkets(s.ideas);
+    // Render will be called again by WS/poll — just note the transition
+  }
+  wasSessionRunning = s.session.running;
 
   renderQueue(s.queue);
   renderMarkets(s.ideas);
@@ -184,7 +192,10 @@ function render(s) {
       )));
   }
 
-  if (wasOptimizing && !s.optimize.running) {}
+  if (wasOptimizing && !s.optimize.running) {
+    // State machine transition: optimization just completed
+    // GEPA history is already rendered from s.optimize.history above
+  }
   wasOptimizing = s.optimize.running;
 
   if (s.sessions?.length) {
@@ -252,9 +263,8 @@ document.addEventListener("click", async (e) => {
     const approve = e.target.closest("button[data-approve]");
     if (approve) {
       approve.disabled = true;
-      const mech = prompt("Mechanism (how does this work?)") || "";
-      const falsif = prompt("Falsification test (what would prove it wrong?)") || "";
-      await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ideaId: approve.dataset.approve, mechanism: mech, falsification: falsif }) });
+      // Simple one-click approve — no confusing prompts
+      await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ideaId: approve.dataset.approve }) });
       await refresh();
       return;
     }
