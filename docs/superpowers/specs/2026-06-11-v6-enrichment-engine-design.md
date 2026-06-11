@@ -103,6 +103,35 @@ ungrounded one; the dossier shows which is which.
 - If the embedding model fails to load at runtime, enrichment refuses to run
   (no silent "everything is novel" fallback).
 
+## Python compute — `pyrun(code, files?)`
+
+Agents can run Python for analysis — the RLM paper's substrate, and the only
+way "data → analysis" is real rather than asserted. JavaScript remains the
+action space; Python is a compute tool inside it.
+
+- New sandbox function: `await pyrun(code, files?)` → `{stdout, error}`.
+  `files` is a list of jail-relative paths; the HOST (not the agent) reads
+  them through the target jail and feeds them to the interpreter. The agent
+  never gets a filesystem.
+- **Isolation: Pyodide (Python-in-WASM) is the primary candidate** — hard
+  boundary by construction (no fs, no network, no syscalls); files arrive via
+  its in-memory FS; numpy/pandas available. Pinned at plan time by a live
+  probe. Fallback if it probes too heavy: CPython subprocess in isolated mode
+  (`-I`), scratch-dir cwd, fed only jail-approved copies, wall-clock + memory
+  caps — a soft boundary, acceptable only with the caps and documented as such.
+- Caps: CPU/wall time per call (default 20s), output truncation (32KB),
+  per-iteration call budget charged to the run ledger; every execution
+  recorded in the agent transcript.
+- **`computed` becomes the third — and strongest — evidence provenance class:**
+  `[computed: <code hash>]` outranks `[target: path:line]` outranks
+  `[model knowledge]` in dossier presentation. Quantitative claims with no
+  computed evidence are labeled as unverified assertions.
+- **Explicit non-goal:** `pyrun` executes agent-written analysis code ONLY.
+  It must never execute the target's own code (tests, scripts, imports of
+  target modules) — that is arbitrary code execution on the host. The jail
+  feeds file CONTENTS as data; nothing from the target is ever on an
+  interpreter path.
+
 ## What carries forward unchanged
 
 Engine (RlmAgent/sandbox/harness/budget), store + human-only settlement,
@@ -132,6 +161,9 @@ this spec's scope), watched sources/inbox, any scheduler.
 
 - Jail: traversal (`../`), absolute paths, symlink-out, deny-list, size caps,
   read-budget exhaustion — all refused; in-root reads succeed. No LLM needed.
+- pyrun: arithmetic round-trip; pandas aggregation over a fed CSV; infinite
+  loop killed at the cap; output truncation; no network (a socket attempt
+  fails); files outside the jail refused before the interpreter sees them.
 - Embeddings: paraphrase guard (blocking), persistence round-trip.
 - Scout: fixture folders (tiny codebase / CSV / task.md) → expected claim
   kinds, caps respected, budget charged — with a stub LLM.
@@ -146,7 +178,7 @@ this spec's scope), watched sources/inbox, any scheduler.
 ## Build order (phases of one implementation plan)
 
 1. **Foundations:** real embeddings + paraphrase guard; jailed target API +
-   jail test battery; kiss gate (clamped). 
+   jail test battery; `pyrun` with isolation probe + caps; kiss gate (clamped).
 2. **Pipeline:** scout, enrich orchestration (reusing runSession with
    `context` injection), dossier writer + J(p) selection.
 3. **Surface:** `mp` CLI entry + REPL `enrich` + `POST /api/enrich` + minimal
