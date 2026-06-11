@@ -45,6 +45,14 @@ export class Store {
   // ── ideas / claims ──
   propose(input: ProposeInput): { ideaId: string; claimIds: string[] } {
     if (input.claims.length === 0) throw new Error("propose: at least one claim required");
+    
+    // Dedup: check if any claim text already exists in an accepted idea
+    const placeholders = input.claims.map(() => "?").join(",");
+    const existing = this.db.prepare(
+      `SELECT c.id FROM claims c JOIN ideas i ON c.idea_id=i.id WHERE c.text IN (${placeholders}) AND i.status='accepted' LIMIT 1`
+    ).all(...input.claims) as Array<{ id: string }>;
+    if (existing.length > 0) throw new Error(`propose: duplicate claim — already exists in accepted idea`);
+    
     const base = input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "idea";
     let ideaId = base;
     for (let n = 2; this.getIdea(ideaId); n++) ideaId = `${base}-${n}`;
