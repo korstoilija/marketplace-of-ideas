@@ -9,6 +9,7 @@ import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
 import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
 import { selfImprove } from "./self-improve.js";
+import { llmSearch } from "../engine/search.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 
@@ -257,7 +258,8 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           llm: setup.llm,
           maxIterations, maxDepth: 1, maxSubAgentCalls: 3,
           sandboxTimeoutMs: 30_000, stallIterations: 10,
-        }), (result, error) => {
+          search: llmSearch(setup.llm),
+        } as never), (result, error) => {
           if (result) session.error = result.failures.map(f => `${f.agentId}: ${f.error}`).join("; ") || null;
         });
 

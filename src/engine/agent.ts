@@ -19,6 +19,7 @@ export interface AgentConfig {
   sandboxTimeoutMs: number;
   depth?: number;
   onIteration?: (agentId: string, iteration: number) => void;
+  search?: (query: string) => Promise<string>;
   recordIteration?: (rec: { agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }) => void;
 }
 
@@ -68,6 +69,7 @@ export class RlmAgent {
       agentId,
       subAgent,
       llm: this.cfg.llm,
+      search: this.cfg.search,
       timeoutMs: this.cfg.sandboxTimeoutMs,
     });
 

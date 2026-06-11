@@ -28,6 +28,7 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   state() -> {ideas,claims,openMarkets,balance,reputation}
   await subAgent(prompt) -> verdict
   await llm(prompt) -> string
+  await search(query) -> string  // web search, returns evidence snippets
   print(...)
   Final = {}
 

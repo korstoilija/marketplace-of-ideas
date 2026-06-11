@@ -14,6 +14,7 @@ export interface SessionConfig {
   maxSubAgentCalls: number;
   sandboxTimeoutMs: number;
   stallIterations: number;
+  search?: (query: string) => Promise<string>;
 }
 
 export interface SessionResult {
@@ -72,7 +73,7 @@ export async function runSession(cfg: SessionConfig): Promise<SessionResult> {
         maxSubAgentCalls: cfg.maxSubAgentCalls,
         sandboxTimeoutMs: cfg.sandboxTimeoutMs,
         onIteration,
-        recordIteration,
+        search: cfg.search,
       }).run(),
     ),
   );

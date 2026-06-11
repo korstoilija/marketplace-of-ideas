@@ -8,6 +8,7 @@ export interface SandboxConfig {
   agentId: string;
   subAgent: (prompt: string) => Promise<unknown>;
   llm: (prompt: string) => Promise<string>;
+  search?: (query: string) => Promise<string>;
   timeoutMs?: number;
 }
 
@@ -84,6 +85,12 @@ export class Sandbox {
       },
       subAgent: (prompt: string) => cfg.subAgent(String(prompt)),
       llm: (prompt: string) => cfg.llm(String(prompt)),
+      /** Web search: returns snippets for use as evidence. */
+      search: async (query: string) => {
+        if (!cfg.search) return "search disabled (no search hook configured)";
+        try { return await cfg.search(String(query)); }
+        catch (e) { return "search error: " + String(e); }
+      },
       Final: undefined as unknown,
     };
 
