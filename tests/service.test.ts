@@ -230,7 +230,9 @@ describe("optimize over HTTP", () => {
   it("snapshot carries trainingExamples count and optimize state", async () => {
     const s = await (await fetch(url("/api/state"))).json();
     expect(s.trainingExamples).toBe(0);
-    expect(s.optimize).toEqual({ running: false, error: null });
+    expect(s.optimize.running).toBe(false);
+    expect(s.optimize.error).toBeNull();
+    expect(s.optimize.last).toBeNull();
   });
 });
 

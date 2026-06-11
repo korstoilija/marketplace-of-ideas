@@ -138,10 +138,25 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
     })),
     queue: buildAdjudicationCards(store),
     recentOrders: store.recentOrders(15),
-    session: { running: session.running, error: session.error },
+    sessions: store.listSessions().slice(0, 10),
+    metrics: computeMetrics(store),
+    session: {
+      running: session.running,
+      error: session.error,
+      lastRuns: session.last?.runs.map(r => ({
+        agentId: r.agentId,
+        iterations: r.iterations.length,
+        final: r.final,
+      })) ?? [],
+    },
     trainingExamples: optimize.trainingExamples,
     minExamples: MIN_EXAMPLES,
-    optimize: { running: optimize.job.running, error: optimize.job.error },
+    optimize: {
+      running: optimize.job.running,
+      error: optimize.job.error,
+      last: optimize.job.last,
+      history: store.listOptimizations().slice(0, 5),
+    },
   };
 }
 

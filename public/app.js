@@ -112,6 +112,7 @@ function render(s) {
   $("feed").replaceChildren(...s.recentOrders.map(o =>
     el("div", {}, `${o.agentId} bought ${o.shares.toFixed(0)} ${o.side.toUpperCase()} on ${o.claimId} (cost ${o.cost.toFixed(1)})`)));
 
+  // GEPA evaluator state
   const need = s.minExamples ?? 30;
   const have = s.trainingExamples ?? 0;
   $("runGepa").disabled = s.optimize.running || have < need;
@@ -121,11 +122,52 @@ function render(s) {
         ? `Last run: ${s.optimize.error}`
         : (have < need ? `${have}/${need} rulings collected — adjudicate more claims to enable.` : `${have} rulings ready.`));
 
-  if (wasOptimizing && !s.optimize.running) loadGepaHistory();
+  // GEPA history (from snapshot, no extra fetch)
+  if (s.optimize.history) {
+    $("gepaHistory").replaceChildren(...s.optimize.history.map(h =>
+      el("tr", {},
+        el("td", {}, new Date(h.createdAt).toLocaleString()),
+        el("td", {}, h.baseline.toFixed(3)),
+        el("td", {}, h.optimized.toFixed(3)),
+        el("td", {}, String(h.examplesUsed + h.holdoutSize)),
+      )));
+  }
+
+  // Session transition — on completion, show what happened
+  if (wasOptimizing && !s.optimize.running) {} // GEPA already handled above
   wasOptimizing = s.optimize.running;
 
-  if (wasSessionRunning && !s.session.running) { loadSessions(); loadMetrics(); }
-  wasSessionRunning = s.session.running;
+  // Sessions list (from snapshot, no extra fetch)
+  if (s.sessions?.length) {
+    $("sessions").replaceChildren(...s.sessions.map(x =>
+      el("div", { class: "sessrow", "data-session": String(x.id) },
+        el("div", {}, x.topic),
+        el("div", {}, `${x.agents} agents · ${x.iterations} iterations`),
+        el("div", {}, x.endedAt ? "done" : "running"),
+      )));
+  }
+
+  // Metrics (from snapshot, no extra fetch)
+  if (s.metrics?.adjudicated) {
+    const m = s.metrics;
+    const rows = [
+      el("div", {}, `rulings: ${m.adjudicated}`),
+      m.informativeness !== null ? el("div", {}, `informativeness: ${m.informativeness.toFixed(2)} (true: ${m.meanPriceTrue?.toFixed(2)}, false: ${m.meanPriceFalse?.toFixed(2)})`) : null,
+      m.verdictVariance !== null ? el("div", {}, `disagreement: ${m.verdictVariance.toFixed(3)}`) : null,
+      el("div", {}, `reputation spread: ${m.reputationSpread.toFixed(2)}`),
+    ].filter(Boolean);
+    const cal = el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "price"), el("th", {}, "n"), el("th", {}, "true%"))),
+      el("tbody", {}, ...m.calibration.filter(b => b.n > 0).map(b =>
+        el("tr", {}, el("td", {}, b.bucket), el("td", {}, String(b.n)), el("td", {}, `${(b.fracTrue * 100).toFixed(0)}%`)))));
+    $("metrics").replaceChildren(...rows, cal);
+  }
+
+  // Session completion — show result in status
+  if (s.session.lastRuns?.length) {
+    const summaries = s.session.lastRuns.map(r => `${r.agentId}: ${r.iterations} iters`).join(", ");
+    $("sessionStatus").textContent = `Last session: ${summaries}` + (s.session.error ? ` (${s.session.error})` : "");
+  }
 }
 
 document.addEventListener("click", async (e) => {
@@ -188,91 +230,41 @@ $("runGepa").addEventListener("click", async () => {
   } catch (err) {
     $("gepaStatus").textContent = `Network error: ${err.message || err}`;
   }
-  await loadGepaHistory();
 });
 
-async function loadGepaHistory() {
-  try {
-    const s = await (await fetch("/api/optimize")).json();
-    $("gepaHistory").replaceChildren(...s.history.map(h =>
-      el("tr", {},
-        el("td", {}, new Date(h.createdAt).toLocaleString()),
-        el("td", {}, h.baseline.toFixed(3)),
-        el("td", {}, h.optimized.toFixed(3)),
-        el("td", {}, String(h.examplesUsed + h.holdoutSize)),
-      )));
-  } catch { /* server gone */ }
-}
-loadGepaHistory();
-
-async function loadMetrics() {
-  try {
-    const m = await (await fetch("/api/metrics")).json();
-    $("metrics").replaceChildren();
-    $("metrics").classList.remove("empty");
-    const tbl = el("table");
-    const addRow = (label, value) => tbl.append(el("tr", {},
-      el("td", {}, label),
-      el("td", {}, value == null ? "—" : String(value)),
-    ));
-    addRow("Adjudicated", m.adjudicated);
-    addRow("Mean price (true)", m.meanPriceTrue?.toFixed(3) ?? null);
-    addRow("Mean price (false)", m.meanPriceFalse?.toFixed(3) ?? null);
-    addRow("Informativeness", m.informativeness?.toFixed(3) ?? null);
-    addRow("Verdict variance", m.verdictVariance?.toFixed(4) ?? null);
-    addRow("Reputation spread", m.reputationSpread.toFixed(2));
-    $("metrics").append(tbl);
-    if (m.calibration.length) {
-      const cal = el("table");
-      cal.append(el("thead", {}, el("tr", {},
-        el("th", {}, "Bucket"),
-        el("th", {}, "N"),
-        el("th", {}, "Frac true"),
-      )));
-      for (const b of m.calibration) {
-        cal.append(el("tr", {},
-          el("td", {}, b.bucket),
-          el("td", {}, String(b.n)),
-          el("td", {}, b.n ? b.fracTrue.toFixed(2) : "—"),
-        ));
-      }
-      $("metrics").append(el("div", { style: "margin-top:6px" }, "Calibration:"), cal);
-    }
-  } catch { /* server gone */ }
-}
-
-async function loadSessions() {
-  try {
-    const { sessions } = await (await fetch("/api/sessions")).json();
-    if (!sessions || !sessions.length) {
-      $("sessions").replaceChildren(el("p", { class: "empty" }, "No sessions yet."));
-      return;
-    }
-    $("sessions").classList.remove("empty");
-    $("sessions").replaceChildren(...sessions.map(s =>
-      el("div", { class: "sessrow", "data-sid": s.id },
-        el("span", {}, `#${s.id} ${s.topic.slice(0, 60)}`),
-        el("span", { style: "color:var(--dim);font-size:12px" },
-          `${s.iterations} iters · ${s.agents} agents · ${new Date(s.startedAt).toLocaleTimeString()}`),
-      )));
-  } catch { /* server gone */ }
-}
-
+// Transcript viewer: click a session row to see agent code
 document.addEventListener("click", async (e) => {
   const row = e.target.closest(".sessrow");
   if (!row) return;
-  const id = parseInt(row.dataset.sid, 10);
-  const data = await (await fetch(`/api/sessions/${id}`)).json();
-  $("transcript").replaceChildren(
-    el("h2", { style: "font-size:13px;margin-top:10px" }, `Session #${id}: ${data.session.topic}`),
-    ...data.iterations.map(it =>
-      el("div", {},
-        el("div", { class: "it-head" }, `${it.agentId} depth=${it.depth} iter=${it.iteration} ${it.timedOut ? "TIMEOUT" : ""} ${it.hasFinal ? "FINAL" : ""}`),
-        el("pre", {}, it.code),
-        el("pre", { style: "color:var(--dim)" }, it.stdout.slice(0, 2000)),
+  const id = parseInt(row.dataset.session, 10);
+  if (!id) return;
+  try {
+    const data = await (await fetch(`/api/sessions/${id}`)).json();
+    $("transcript").replaceChildren(
+      el("h2", { style: "font-size:13px;margin-top:10px" }, `Session #${id}: ${data.session.topic}`),
+      ...data.iterations.map(it =>
+        el("div", {},
+          el("div", { class: "it-head" }, `${it.agentId} depth=${it.depth} iter=${it.iteration}${it.timedOut ? " TIMEOUT" : ""}${it.hasFinal ? " FINAL" : ""}`),
+          el("pre", {}, it.code),
+          el("pre", { style: "color:var(--dim)" }, it.stdout.slice(0, 2000)),
+        )),
+    );
+  } catch { /* server gone */ }
+});
+
+let pollTimer = null;
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $("conn").textContent = "live"; if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+  ws.onmessage = (ev) => { histCache.clear(); render(JSON.parse(ev.data)); };
+  ws.onclose = () => {
+    $("conn").textContent = "polling";
+    if (!pollTimer) pollTimer = setInterval(refresh, 2000);
+    setTimeout(connect, 3000);
+  };
+}
+connect();
+refresh();
       )),
   );
 });
-
-loadMetrics();
-loadSessions();
