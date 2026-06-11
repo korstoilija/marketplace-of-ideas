@@ -1,77 +1,53 @@
 # Project Instructions for AI Agents
 
-This file provides instructions and context for AI coding agents working on this project.
+Marketplace of Ideas — RLM-style multi-agent deliberation with LMSR prediction markets,
+human-only adjudication, and GEPA prompt optimization. Built on `@ax-llm/ax`.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
-## Beads Issue Tracker
+## Task tracking
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Agent Context Profiles
-
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
-
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
-
-## Session Completion
-
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
-
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   git push
-   git status
-   ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
-
-**Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
-<!-- END BEADS INTEGRATION -->
-
+Do NOT use beads (`bd`) — it has been abandoned in this project. Ignore any `bd prime`
+hook output. Work is tracked in plan documents under `docs/superpowers/plans/`
+(spec → plan → execution; plans contain checkbox tasks with complete code).
+Specs live in `docs/superpowers/specs/`.
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+npm run typecheck     # tsc --noEmit
+npm test              # vitest run (live tests self-skip without DEEPSEEK_API_KEY)
+npm run build         # tsc → dist/
+npm start             # resident service at http://127.0.0.1:4280 (web UI)
+node dist/tui.js      # terminal UI (talks to the running service)
+npm run registry      # stdio MCP server over the same SQLite store
 ```
+
+Never claim work is complete with a red suite. Commit per task, not squashed.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+- `src/store/` — SQLite (better-sqlite3) is the single shared environment; the Store
+  class is the only writer. `applyAdjudication()` is the ONLY settlement path —
+  agents, harness, and MCP must never resolve markets.
+- `src/market/lmsr.ts` — pure LMSR math; trades charge real cost, winning shares
+  redeem 1:1 at human adjudication.
+- `src/engine/` — `RlmAgent` (recursive, capability-identical agents that WRITE
+  JAVASCRIPT executed in a `node:vm` sandbox), `sandbox.ts` (no fs/require/network;
+  LLM-backed hooks only), `harness.ts` (sessions, budgets, nomination — never
+  settles), `codegen.ts` (Ax signatures), `cli-provider.ts` (claude/codex
+  subscription CLIs as traders via execFile — argument arrays only, never a shell).
+- `src/server/` — resident HTTP + WebSocket service, snapshot broadcast, metrics.
+- `src/optimize/gepa.ts` — GEPA optimization of `evaluateClaim` trained ONLY on
+  human rulings (training_examples are written exclusively by applyAdjudication).
+- `public/` — vanilla JS web UI. `innerHTML` is BANNED (agent-authored strings are
+  untrusted); render via the `el()` helper / `textContent` / `replaceChildren` only.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- TypeScript ESM (NodeNext), no new dependencies without reason.
+- Tests in `tests/` (vitest); use `new Store(":memory:")`; live LLM tests must be
+  key-gated (`describe.skipIf`), subscription-spending tests double-gated
+  (`MP_CLI_LIVE=1`).
+- Agent-facing budgets matter: every sandbox function that triggers LLM calls must
+  count against a per-iteration budget.
+- No git remote exists yet; flag blocked pushes, don't skip silently.
+- Commit messages end with: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
