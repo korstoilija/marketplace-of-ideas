@@ -98,13 +98,13 @@ for (const cid of claimIds) {
 print("Evaluation complete. " + claimIds.length + " claims evaluated with real LLMs.");`;
 }
 
-/** Template-first code generator: first iteration uses contentSig + buildTemplate.
- *  Subsequent iterations use writeCodeSig for self-correction. */
+/** Per-call code generator: first iteration uses contentSig + buildTemplate.
+ *  Subsequent iterations use writeCodeSig for self-correction.
+ *  Stateless — the outer agent loop tracks which iteration it's on via metadata. */
 export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
-  let firstCall = true;
   return async (inputs) => {
-    if (firstCall) {
-      firstCall = false;
+    // First iteration: use structured content extraction (no JS generation needed)
+    if (!inputs.historyText || inputs.historyText === "(first iteration)") {
       try {
         const res = await contentSig.forward(llm, { topic: inputs.task });
         const title = String(res.title ?? "").slice(0, 100) || "Untitled";

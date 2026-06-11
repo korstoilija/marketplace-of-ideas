@@ -122,6 +122,7 @@ export class Sandbox {
 
   async execute(code: string): Promise<ExecResult> {
     this.captured = "";
+    this.box["Final"] = undefined;  // Reset Final between iterations — prevents stale state leak
     let error: string | null = null;
     let timedOut = false;
 

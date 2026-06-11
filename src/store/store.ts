@@ -211,16 +211,21 @@ export class Store {
     const m = this.getMarket(o.claimId);
     if (!m) throw new Error(`placeOrder: no market for ${o.claimId}`);
     if (m.resolution) throw new Error(`placeOrder: market ${o.claimId} already resolved`);
-    const agent = this.getAgent(o.agentId);
-    if (!agent) throw new Error(`placeOrder: unknown agent ${o.agentId}`);
 
     const cost = buyCost(m.qYes, m.qNo, m.b, o.side, o.shares);
-    if (cost > agent.balance) throw new Error(`placeOrder: insufficient balance (${agent.balance.toFixed(1)} < ${cost.toFixed(1)})`);
 
     const tx = this.db.transaction(() => {
+      // Atomic: check balance AND debit inside transaction to prevent TOCTOU races
+      const agent = this.getAgent(o.agentId);
+      if (!agent) throw new Error(`placeOrder: unknown agent ${o.agentId}`);
+      if (cost > agent.balance) throw new Error(`placeOrder: insufficient balance (${agent.balance.toFixed(1)} < ${cost.toFixed(1)})`);
       this.adjustBalance(o.agentId, -cost);
-      const col = o.side === "yes" ? "q_yes" : "q_no";
-      this.db.prepare(`UPDATE markets SET ${col} = ${col} + ? WHERE claim_id = ?`).run(o.shares, o.claimId);
+      // Parameterized column update — no SQL interpolation
+      if (o.side === "yes") {
+        this.db.prepare("UPDATE markets SET q_yes = q_yes + ? WHERE claim_id = ?").run(o.shares, o.claimId);
+      } else {
+        this.db.prepare("UPDATE markets SET q_no = q_no + ? WHERE claim_id = ?").run(o.shares, o.claimId);
+      }
       this.db.prepare(
         `INSERT INTO positions (claim_id, agent_id, side, shares) VALUES (?, ?, ?, ?)
          ON CONFLICT(claim_id, agent_id, side) DO UPDATE SET shares = shares + excluded.shares`,
