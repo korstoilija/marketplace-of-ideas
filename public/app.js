@@ -19,22 +19,28 @@ function el(tag, attrs = {}, ...children) {
 const histCache = new Map();
 
 function renderQueue(queue) {
-  const cards = queue.map(c =>
-    el("div", { class: "card" },
-      el("div", { class: "claim" }, c.claimText),
-      el("div", { class: "meta" },
-        `${c.ideaTitle} · yes ${(c.yesPrice * 100).toFixed(0)}% · ${c.orders} orders · ${c.reason}`),
-      c.supporting.map(e => el("div", { class: "ev sup" }, e)),
-      c.counter.map(e => el("div", { class: "ev cnt" }, e)),
-      c.verdicts.slice(0, 2).map(v =>
-        el("div", { class: "verdict" }, `${v.agentId} ${(v.confidence * 100).toFixed(0)}%: ${v.reasoning}`)),
-      el("div", { class: "actions" },
-        el("button", { class: "rule-true", "data-claim": c.claimId, "data-ruling": "true" }, "True"),
-        el("button", { class: "rule-false", "data-claim": c.claimId, "data-ruling": "false" }, "False"),
-        el("button", { "data-claim": c.claimId, "data-ruling": "skip" }, "Skip"),
-      ),
-    ));
+  const selected = new Set(JSON.parse(localStorage.getItem("mp_selected") || "[]"));
+  const cards = queue.map(c => {
+    const checked = selected.has(c.claimId);
+    return el("div", { class: "card" },
+      el("div", { style: "display:flex;gap:8px;align-items:start" },
+        el("input", { type: "checkbox", "data-claim": c.claimId, checked, style: "margin-top:3px" }),
+        el("div", { style: "flex:1" },
+          el("div", { class: "claim" }, c.claimText),
+          el("div", { class: "meta" }, `${c.ideaTitle} · yes ${(c.yesPrice * 100).toFixed(0)}% · ${c.orders} orders · ${c.reason}`),
+          c.supporting.map(e => el("div", { class: "ev sup" }, e)),
+          c.counter.map(e => el("div", { class: "ev cnt" }, e)),
+          c.verdicts.slice(0, 2).map(v => el("div", { class: "verdict" }, `${v.agentId} ${(v.confidence * 100).toFixed(0)}%: ${v.reasoning}`)),
+          el("div", { class: "actions" },
+            el("button", { class: "rule-true", "data-claim": c.claimId, "data-ruling": "true" }, "True"),
+            el("button", { class: "rule-false", "data-claim": c.claimId, "data-ruling": "false" }, "False"),
+            el("button", { "data-claim": c.claimId, "data-ruling": "skip" }, "Skip"),
+          ),
+        ),
+      ));
+  });
   $("queue").replaceChildren(...(cards.length ? cards : [el("p", { class: "empty" }, "Nothing needs your judgment yet.")]));
+  updateBatchBar();
 }
 
 function sparkSvg(claimId) {
@@ -190,6 +196,43 @@ document.addEventListener("click", async (e) => {
     body: JSON.stringify({ claimId: btn.dataset.claim, ruling: btn.dataset.ruling }),
   });
   await refresh();
+  await loadMetrics?.();
+});
+
+// Checkbox selection for batch adjudication
+document.addEventListener("change", (e) => {
+  const cb = e.target.closest("input[type=checkbox][data-claim]");
+  if (!cb) return;
+  const selected = new Set(JSON.parse(localStorage.getItem("mp_selected") || "[]"));
+  if (cb.checked) selected.add(cb.dataset.claim);
+  else selected.delete(cb.dataset.claim);
+  localStorage.setItem("mp_selected", JSON.stringify([...selected]));
+  updateBatchBar();
+});
+
+function updateBatchBar() {
+  const selected = new Set(JSON.parse(localStorage.getItem("mp_selected") || "[]"));
+  const visible = document.querySelectorAll("#queue input[data-claim]");
+  const count = [...visible].filter(cb => selected.has(cb.dataset.claim)).length;
+  $("batchBar").style.display = count > 0 ? "block" : "none";
+  $("batchCount").textContent = `${count} selected`;
+}
+
+async function batchAdjudicate(ruling) {
+  const selected = JSON.parse(localStorage.getItem("mp_selected") || "[]");
+  if (!selected.length) return;
+  await fetch("/api/adjudicate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rulings: selected.map(claimId => ({ claimId, ruling })) }),
+  });
+  localStorage.setItem("mp_selected", "[]");
+  await refresh();
+}
+
+["ruleAllTrue", "ruleAllFalse", "ruleAllSkip"].forEach(id => {
+  const btn = $(id);
+  if (btn) btn.addEventListener("click", () => batchAdjudicate(id === "ruleAllTrue" ? "true" : id === "ruleAllFalse" ? "false" : "skip"));
 });
 
 $("sessionForm").addEventListener("submit", async (e) => {

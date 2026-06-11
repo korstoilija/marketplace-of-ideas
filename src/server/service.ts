@@ -224,6 +224,24 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
 
       if (u === "/api/adjudicate" && method === "POST") {
         const body = await readBody(req);
+        // Batch mode: {rulings: [{claimId, ruling}, ...]}
+        if (body["rulings"] && Array.isArray(body["rulings"])) {
+          const rulings = body["rulings"] as Array<{ claimId: string; ruling: string }>;
+          const results: Array<{ claimId: string; ok: boolean; error?: string }> = [];
+          for (const r of rulings) {
+            const cid = String(r.claimId ?? "");
+            const ruling = String(r.ruling ?? "");
+            if (!store.getClaim(cid)) { results.push({ claimId: cid, ok: false, error: "unknown claim" }); continue; }
+            if (ruling === "skip") { store.skipNomination(cid); results.push({ claimId: cid, ok: true }); continue; }
+            if (ruling !== "true" && ruling !== "false") { results.push({ claimId: cid, ok: false, error: "ruling must be true|false|skip" }); continue; }
+            try { store.applyAdjudication(cid, ruling === "true"); results.push({ claimId: cid, ok: true }); }
+            catch (e) { results.push({ claimId: cid, ok: false, error: String(e instanceof Error ? e.message : e) }); }
+          }
+          optimizeState.trainingExamples = store.trainingExampleCount();
+          _broadcast();
+          return json(res, { batch: true, results });
+        }
+        // Single mode
         const claimId = String(body["claimId"] ?? "");
         const ruling = String(body["ruling"] ?? "");
         if (!store.getClaim(claimId)) return json(res, { error: `unknown claim: ${claimId}` }, 400);
