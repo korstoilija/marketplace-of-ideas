@@ -27,6 +27,7 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   market.positions() -> [{claimId,side,shares}]
   state() -> {ideas,claims,openMarkets,balance,reputation}
   await subAgent(prompt) -> verdict
+  await llm(prompt) -> string
   print(...)
   Final = {}
 
@@ -49,6 +50,11 @@ export const evaluateClaimSig = ax(
   "claimText:string, supportingEvidence:string, counterEvidence:string -> confidence:number \"probability 0-1 that the claim is true\", reasoning:string",
 );
 
+/** Content extraction: LLM returns structured {title, claims}, not JavaScript. */
+export const contentSig = ax(
+  "topic:string -> title:string \"short title for the idea\", claims:string[] \"2-3 verifiable claims about the topic\"",
+);
+
 /** LLM output -> runnable code: prefer the first fenced block, else strip stray fences. */
 export function extractCode(response: string): string {
   const fenced = response.match(/```(?:javascript|js)?\s*\n([\s\S]*?)```/);
@@ -56,8 +62,38 @@ export function extractCode(response: string): string {
   return response.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
 }
 
+/** Build guaranteed-valid JavaScript from structured content. Zero failure rate. */
+export function buildTemplate(title: string, claims: string[]): string {
+  const escapedTitle = JSON.stringify(title);
+  const escapedClaims = JSON.stringify(claims);
+  return `const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
+for (const cid of claimIds) {
+  const p = market.price(cid);
+  const shares = Math.max(5, Math.abs(p - 0.5) * 200);
+  if (p > 0.55) market.buyYes(cid, shares);
+  else if (p < 0.45) market.buyNo(cid, shares);
+  else print(cid + " price:" + p.toFixed(2) + " (no trade)");
+}
+print("Proposed " + claimIds.length + " claims");
+Final = { summary: "Done", claims: claimIds.length };`;
+}
+
+/** Template-first code generator: first iteration uses contentSig + buildTemplate.
+ *  Subsequent iterations use writeCodeSig for self-correction. */
 export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
+  let firstCall = true;
   return async (inputs) => {
+    if (firstCall) {
+      firstCall = false;
+      try {
+        const res = await contentSig.forward(llm, { topic: inputs.task });
+        const title = String(res.title ?? "").slice(0, 100) || "Untitled";
+        const claims = (Array.isArray(res.claims) ? res.claims : []).filter((c: unknown) => typeof c === "string").slice(0, 3);
+        if (claims.length > 0) return buildTemplate(title, claims as string[]);
+      } catch { /* fall through to codegen */ }
+    }
+
+    // Subsequent iterations: freeform code with error feedback
     const res = await writeCodeSig.forward(llm, {
       task: `${inputs.task}\n\n${SANDBOX_API_DOC}`,
       persona: inputs.persona,

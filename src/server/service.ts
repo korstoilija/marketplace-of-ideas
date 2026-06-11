@@ -8,6 +8,7 @@ import { runSession, type SessionResult } from "../engine/harness.js";
 import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
 import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
+import { selfImprove } from "./self-improve.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 
@@ -292,6 +293,35 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
           trainingExamples: optimizeState.trainingExamples,
           minExamples: MIN_EXAMPLES,
         });
+      }
+
+      if (u === "/api/self-improve" && method === "POST") {
+        try {
+          const result = await selfImprove(store);
+          return json(res, result);
+        } catch (err) {
+          return json(res, { error: String(err instanceof Error ? err.message : err) }, 500);
+        }
+      }
+
+      if (u === "/api/seed" && method === "POST") {
+        store.ensureAgent("seed");
+        const ideas = [
+          { title: "TypeScript Static Types Reduce Bugs", claims: ["Static typing catches 15% of production bugs", "TypeScript type system is sound for practical use"] },
+          { title: "Python is Faster for Prototyping", claims: ["Python development is 2x faster for MVPs", "Dynamic typing enables rapid iteration"] },
+        ];
+        const created: string[] = [];
+        for (const idea of ideas) {
+          const r = store.propose({ ...idea, summary: "", body: "", author: "seed" });
+          for (const cid of r.claimIds) {
+            store.addEvidence({ claimId: cid, excerpt: "Empirical study (2024): type-checked codebases have fewer runtime errors", stance: "supporting", submittedBy: "seed" });
+            store.addEvidence({ claimId: cid, excerpt: "Counter: type overhead slows initial development", stance: "counter", submittedBy: "seed" });
+            store.placeOrder({ claimId: cid, agentId: "seed", side: "yes", shares: 100 });
+          }
+          created.push(r.ideaId);
+        }
+        _broadcast();
+        return json(res, { seeded: created.length, ideaIds: created });
       }
 
       if (method === "GET") {

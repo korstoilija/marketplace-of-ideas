@@ -87,7 +87,12 @@ export class RlmAgent {
       iterations.push({ code, result });
       this.cfg.recordIteration?.({ agentId, depth: this.depth, iteration: i, code, stdout: result.stdout, timedOut: result.timedOut, hasFinal: result.hasFinal });
       history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);
-      history.push(`[out ${i}] ${result.stdoutTruncated.slice(0, HISTORY_ENTRY_CHARS)}`);
+      const hasError = result.stdout.includes("ERROR") || result.stdout.includes("ReferenceError") || result.stdout.includes("TypeError");
+      if (hasError) {
+        history.push(`[out ${i}] ⚠ YOUR LAST CODE FAILED: ${result.stdout.slice(0, HISTORY_ENTRY_CHARS)}`);
+      } else {
+        history.push(`[out ${i}] ${result.stdoutTruncated.slice(0, HISTORY_ENTRY_CHARS)}`);
+      }
       this.cfg.onIteration?.(agentId, i);
 
       if (result.hasFinal) {
