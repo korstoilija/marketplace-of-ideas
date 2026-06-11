@@ -23,8 +23,8 @@ export interface SessionResult {
   sessionId: number;
 }
 
-const PRICE_HI = 0.85;
-const PRICE_LO = 0.15;
+const PRICE_HI = 0.7;
+const PRICE_LO = 0.3;
 
 /** Nominate claims for human adjudication. NEVER settles anything. */
 export function scanNominations(store: Store, opts: { stallIterations: number }): void {

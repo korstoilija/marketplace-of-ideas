@@ -7,12 +7,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
+    "repl": "node dist/repl.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist",
-    "registry": "node dist/mcp/server.js",
-    "tui": "node dist/tui.js",
-    "mp": "node dist/mp.js"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@ax-llm/ax": "^22.0.3",

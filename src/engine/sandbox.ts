@@ -113,6 +113,14 @@ export class Sandbox {
         try { return await cfg.recall(String(query)); }
         catch (e) { return "recall error: " + String(e); }
       },
+      source: () => `MARKETPLACE CODEBASE (20 TypeScript files):
+  store/ — SQLite db + schema   market/ — LMSR math
+  engine/ — agent, sandbox, codegen, harness, budget
+  server/ — HTTP+WS API, cards, metrics
+  diversity/ — embeddings, Hill diversity
+  optimize/ — GEPA prompt optimization
+  public/ — web UI (index.html, app.js)
+  State: propose→evidence→evaluate→recurse(ambiguous)→trade→nominate(0.7/0.3)→adjudicate→GEPA`,
       Final: undefined as unknown,
     };
 
