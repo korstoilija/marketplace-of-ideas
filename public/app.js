@@ -162,19 +162,19 @@ function render(s) {
     $("sessionStatus").textContent = `Last session: ${summaries}` + (s.session.error ? ` (${s.session.error})` : "");
   }
 
-  // LIVE TRANSCRIPT — every iteration, every error, every output
-  if (s.liveTranscript?.length) {
-    $("liveFeed").replaceChildren(...s.liveTranscript.map(it =>
-      el("div", { style: "font-size:12px;margin:4px 0;padding:4px 6px;border-left:3px solid " + (it.hasError ? "var(--red)" : it.hasFinal ? "var(--green)" : "var(--amber)") + ";background:var(--panel2);border-radius:0 4px 4px 0" },
+  // ALL LOGS — every iteration, every error
+  if (s.allLogs?.length) {
+    $("agentLog").replaceChildren(...s.allLogs.map(it =>
+      el("div", { style: "font-size:11px;margin:2px 0;padding:4px 6px;border-left:3px solid " + (it.hasError ? "var(--red)" : it.hasFinal ? "var(--green)" : "var(--amber)") + ";background:var(--panel2);border-radius:0 4px 4px 0" },
         el("div", { style: "color:var(--accent);font-weight:600" },
-          `${it.agentId} d=${it.depth} #${it.iteration}${it.timedOut ? " ⏱ TIMEOUT" : ""}${it.hasFinal ? " ✓ FINAL" : ""}${it.hasError ? " ✗ ERROR" : ""}`),
-        el("pre", { style: "margin:2px 0;color:var(--dim);max-height:60px;overflow:hidden" }, it.code),
-        el("pre", { style: "margin:2px 0;color:" + (it.hasError ? "var(--red)" : "var(--dim)") + ";max-height:60px;overflow:hidden" }, it.stdout || "(no output)"),
+          `${it.agentId} d=${it.depth} #${it.iteration}${it.timedOut ? " TIMEOUT" : ""}${it.hasFinal ? " FINAL" : ""}${it.hasError ? " ERROR" : ""}`),
+        el("pre", { style: "margin:2px 0;color:var(--dim);max-height:80px;overflow:hidden;white-space:pre-wrap" }, it.code),
+        el("pre", { style: "margin:2px 0;color:" + (it.hasError ? "var(--red)" : "var(--dim)") + ";max-height:80px;overflow:hidden;white-space:pre-wrap" }, it.stdout || "(no output)"),
       )));
   } else if (s.session.running) {
-    $("liveFeed").replaceChildren(el("p", { class: "empty" }, "Session running — waiting for agent iterations..."));
+    $("agentLog").replaceChildren(el("p", { class: "empty" }, "Waiting..."));
   } else {
-    $("liveFeed").replaceChildren(el("p", { class: "empty" }, "No session running."));
+    $("agentLog").replaceChildren(el("p", { class: "empty" }, "No session running."));
   }
 }
 

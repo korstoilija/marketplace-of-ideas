@@ -30,16 +30,16 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   print(...)
   Final = {}
 
-CODE PATTERN (copy this, replace with your topic):
-const {ideaId,claimIds}=ideas.propose({title:"Topic",summary:"Analyze topic",body:"",claims:["Claim A","Claim B"]});
-evidence.submit(claimIds[0],"Evidence for A","supporting");
-evidence.submit(claimIds[0],"Evidence against A","counter");
-evidence.submit(claimIds[1],"Evidence for B","supporting");
-evidence.submit(claimIds[1],"Evidence against B","counter");
-for(const cid of claimIds){const p=market.price(cid);if(p>0.5)market.buyYes(cid,(p-0.5)*200);else market.buyNo(cid,(0.5-p)*200);print(cid+" price:"+p.toFixed(2))}
+CODE PATTERN (replace topic+claims; START with this pattern):
+const{ideaId,claimIds}=ideas.propose({title:"Your Topic Here",summary:"Evaluating claims",body:"",claims:["Claim 1","Claim 2"]});
+evidence.submit(claimIds[0],"Supporting evidence for claim 1","supporting");
+evidence.submit(claimIds[0],"Counter evidence for claim 1","counter");
+evidence.submit(claimIds[1],"Supporting evidence for claim 2","supporting");
+evidence.submit(claimIds[1],"Counter evidence for claim 2","counter");
+for(const cid of claimIds){const p=market.price(cid);const shares=Math.max(5,Math.abs(p-0.5)*200);if(p>0.55)market.buyYes(cid,shares);else if(p<0.45)market.buyNo(cid,shares);else print(cid+" price near 0.5, no trade")}
 Final={summary:"Done",claims:claimIds.length}
 
-RULES: Write ONLY JavaScript. Use the EXACT function names above. Set Final when done.`;
+RULES: Write ONLY JavaScript. Use EXACT function names above. Never pass 0 or negative shares. Print what you did.`;
 
 export const writeCodeSig = ax(
   "task:string, persona:string, stateMetadata:string, historyText:string -> code:string \"runnable JavaScript for the sandbox\"",
