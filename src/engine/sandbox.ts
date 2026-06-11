@@ -64,20 +64,43 @@ export class Sandbox {
         list: (claimId: string) =>
           store.listEvidence(claimId).map(e => ({ excerpt: e.excerpt, stance: e.stance, relevance: e.relevance })),
       },
-      /** Real LLM evaluation of a claim against evidence. Calls llm hook directly. */
+      /** Real LLM evaluation with multi-model debate for ambiguous claims. */
       evaluate: async (claimId: string, supporting: string, counter: string) => {
         const claim = store.getClaim(claimId);
         const claimText = claim?.text || claimId;
         const prompt = `Evaluate this claim. Return a confidence score 0-1.\n\nCLAIM: ${claimText}\n\nSUPPORTING: ${supporting || "none"}\n\nCOUNTER: ${counter || "none"}\n\nReply with ONLY a JSON object: {"confidence": 0.X, "reasoning": "why"}`;
+        
+        // Primary evaluation
         const raw = await cfg.llm(prompt);
         let conf = 0.5, reasoning = "evaluated";
-        try {
-          const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
-          conf = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.5)));
-          reasoning = String(parsed.reasoning || "evaluated").slice(0, 300);
-        } catch { /* use defaults */ }
+        try { const p = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}"); conf = Math.max(0, Math.min(1, Number(p.confidence ?? 0.5))); reasoning = String(p.reasoning || "evaluated").slice(0, 300); } catch {}
+        
+        // Multi-model debate: if ambiguous (0.3-0.7), get a second opinion with different persona
+        if (conf >= 0.3 && conf <= 0.7) {
+          const debatePrompt = `You are a skeptical debater. Challenge the initial evaluation.\n\nCLAIM: ${claimText}\n\nINITIAL EVALUATION: confidence=${conf.toFixed(2)}\n\nArgue the OPPOSITE position. Reply with JSON: {"confidence": 0.X, "reasoning": "counter-argument"}`;
+          const raw2 = await cfg.llm(debatePrompt);
+          try {
+            const p2 = JSON.parse(raw2.match(/\{[\s\S]*\}/)?.[0] || "{}");
+            const conf2 = Math.max(0, Math.min(1, Number(p2.confidence ?? 0.5)));
+            // Average the two (debate produces consensus)
+            const divergence = Math.abs(conf - conf2);
+            conf = (conf + conf2) / 2;
+            reasoning = `DEBATED (divergence=${divergence.toFixed(2)}). Primary: ${reasoning.slice(0,100)} | Counter: ${String(p2.reasoning||'').slice(0,100)}`;
+            // If still ambiguous after debate, trigger subAgent recursion
+            if (conf >= 0.4 && conf <= 0.6) {
+              try {
+                const subResult = await cfg.subAgent(`Decompose this ambiguous claim into sub-claims and evaluate each: "${claimText}"`);
+                if (subResult && typeof subResult === 'object' && 'confidence' in (subResult as Record<string,unknown>)) {
+                  conf = Number((subResult as Record<string,unknown>).confidence) ?? conf;
+                  reasoning += ` | RECURSIVE: ${String((subResult as Record<string,unknown>).reasoning||'').slice(0,100)}`;
+                }
+              } catch { /* subAgent unavailable */ }
+            }
+          } catch {}
+        }
+        
         store.recordVerdict({ claimId, agentId, confidence: conf, reasoning });
-        return { aggregate: { confidence: conf, consensus: 1, divergence: 0 } };
+        return { aggregate: { confidence: conf, consensus: conf >= 0.3 && conf <= 0.7 ? 0.7 : 1, divergence: Math.abs(conf - 0.5) } };
       },
       state: () => {
         const me = store.getAgent(agentId);
