@@ -159,6 +159,15 @@ function render(s) {
         )));
   }
 
+  // Vault entries
+  if (s.vault?.entries?.length) {
+    $("vault").replaceChildren(...s.vault.entries.map(v =>
+      el("div", { class: "card" },
+        el("div", { style: "font-weight:600" }, v.title),
+        el("div", { class: "meta" }, `${v.author} · value: ${v.value.toFixed(2)} · ${new Date(v.acceptedAt).toLocaleDateString()}`),
+      )));
+  }
+
   if (s.metrics?.adjudicated) {
     const m = s.metrics;
     const rows = [

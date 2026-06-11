@@ -15,6 +15,8 @@ import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { compileRiff, confirmInterpretations } from "../refinery/riff.js";
 import { scanSources, tier1Decompose } from "../refinery/cascade.js";
 import { BudgetGuard } from "../engine/budget.js";
+import { synthesizeBrief, selectBriefSet, type Brief } from "../refinery/brief.js";
+import { acceptToVault, listVault, getVaultEntry, type VaultEntry } from "../refinery/vault.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -185,6 +187,7 @@ function snapshot(store: Store, session: AsyncJob<SessionResult>, optimize: Opti
     },
     trainingExamples: optimize.trainingExamples,
     minExamples: MIN_EXAMPLES,
+    vault: { entries: listVault(store) },
     optimize: {
       running: optimize.job.running,
       error: optimize.job.error,
@@ -408,6 +411,57 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         const result = await tier1Decompose(store, items, providers[0].llm, budget);
         _broadcast();
         return json(res, { ...result, sourcesScanned: items.length });
+      }
+
+      // Vault
+      if (u === "/api/vault" && method === "GET") {
+        return json(res, { entries: listVault(store) });
+      }
+      const vaultEntry = u.match(/^\/api\/vault\/(.+)$/);
+      if (vaultEntry && method === "GET") {
+        const entry = getVaultEntry(store, vaultEntry[1]);
+        if (!entry) return json(res, { error: "not found" }, 404);
+        return json(res, { entry });
+      }
+      if (u === "/api/vault" && method === "POST") {
+        const body = await readBody(req);
+        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
+        const entry: VaultEntry = {
+          id: String(body["id"] ?? `vault-${Date.now()}`),
+          title: String(body["title"] ?? ""),
+          body: String(body["body"] ?? ""),
+          author: String(body["author"] ?? "human"),
+          value: Math.max(0, Math.min(1, Number(body["value"] ?? 0.5))),
+          lineage: (body["lineage"] as string[]) ?? [],
+          claims: (body["claims"] as Array<{ text: string; confidence: number; reason: string }>) ?? [],
+        };
+        if (!entry.title) return json(res, { error: "title required" }, 400);
+        const result = acceptToVault(store, entry);
+        _broadcast();
+        return json(res, { ok: true, bountyPaid: result.bountyPaid });
+      }
+
+      // Briefs: synthesize from idea
+      if (u === "/api/briefs" && method === "POST") {
+        const body = await readBody(req);
+        if (parseFail(body)) return json(res, { error: "invalid JSON" }, 400);
+        const ideaIds = (body["ideaIds"] as string[]) ?? [];
+        if (!ideaIds.length) return json(res, { error: "ideaIds required" }, 400);
+        const providers = buildProviders();
+        if (providers.length === 0) return json(res, { error: "no API keys" }, 400);
+        const budget = new BudgetGuard(store);
+        const briefs: Brief[] = [];
+        for (const id of ideaIds) {
+          if (!budget.canSpend(500)) break;
+          const brief = await synthesizeBrief(store, id, providers[0].llm, budget);
+          if (brief) briefs.push(brief);
+        }
+        const selected = selectBriefSet(briefs);
+        _broadcast();
+        return json(res, { briefs: selected, total: briefs.length, selected: selected.length });
+      }
+      if (u === "/api/briefs" && method === "GET") {
+        return json(res, { briefs: [] }); // Briefs are ephemeral; vault is permanent
       }
 
       if (u === "/api/self-improve" && method === "POST") {
