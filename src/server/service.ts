@@ -12,6 +12,7 @@ import { llmSearch } from "../engine/search.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { BudgetGuard } from "../engine/budget.js";
+import { TargetJail } from "../engine/target.js";
 
 const PUBLIC_DIR = join(import.meta.dirname, "..", "..", "public");
 const MIME: Record<string, string> = {
@@ -355,6 +356,27 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         });
 
         return json(res, { started: true, traders: setup.traders.map(t => t.agentId) });
+      }
+
+      // Enrich: point the engine at a folder of context
+      if (u === "/api/enrich" && method === "POST") {
+        const body = await readBody(req);
+        const path = String(body["path"] ?? "").trim();
+        if (!path) return json(res, { error: "path required" }, 400);
+        let target: TargetJail;
+        try { target = new TargetJail({ root: path }); }
+        catch (e) { return json(res, { error: String(e instanceof Error ? e.message : e) }, 400); }
+        const files = target.list();
+        const topic = `Enrich this codebase (${files.length} files). Read target files to understand the code. Propose 1 idea with 3 grounded claims. Use target.read() for evidence with provenance. Evaluate each. Trade. Set Final.`;
+        const setup = traderFactory(2);
+        session.start(runSession({
+          store, topic,
+          traders: setup.traders, leafEvaluator: setup.leafEvaluator, llm: setup.llm,
+          maxIterations: 8, maxDepth: 1, maxSubAgentCalls: 3,
+          sandboxTimeoutMs: 30_000, stallIterations: 10,
+          target,
+        } as never), () => {});
+        return json(res, { started: true, path, files: files.length });
       }
 
       if (u === "/api/session" && method === "GET") {

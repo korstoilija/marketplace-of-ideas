@@ -103,6 +103,13 @@ async function main() {
         });
         console.log(r?.ok ? `Dismissed: ${args[1]}` : `Error: ${r?.error}`);
       }
+      else if (cmd === "enrich" && args[1]) {
+        const r = await api("/api/enrich", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: args[1] }),
+        });
+        console.log(r?.started ? `Enriching ${args[1]}...` : `Error: ${r?.error}`);
+      }
       else if (cmd === "metrics") {
         const m = await api("/api/metrics");
         if (m) console.log(`rulings:${m.adjudicated}  informativeness:${m.informativeness?.toFixed(2) ?? "?"}  spread:${m.reputationSpread?.toFixed(2)}`);

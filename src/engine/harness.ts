@@ -17,6 +17,7 @@ export interface SessionConfig {
   sandboxTimeoutMs: number;
   stallIterations: number;
   recall?: (query: string) => Promise<string>;
+  target?: import("./target.js").TargetJail;
 }
 
 export interface SessionResult {

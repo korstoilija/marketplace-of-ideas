@@ -1,5 +1,6 @@
 import { createContext, runInContext, type Context } from "node:vm";
 import type { Store } from "../store/store.js";
+import { TargetJail } from "./target.js";
 
 const TRUNCATE_STDOUT = 1000;
 
@@ -9,6 +10,7 @@ export interface SandboxConfig {
   subAgent: (prompt: string) => Promise<unknown>;
   llm: (prompt: string) => Promise<string>;
   recall?: (query: string) => Promise<string>;
+  target?: TargetJail;
   timeoutMs?: number;
 }
 
@@ -121,6 +123,10 @@ export class Sandbox {
   optimize/ — GEPA prompt optimization
   public/ — web UI (index.html, app.js)
   State: propose→evidence→evaluate→recurse(ambiguous)→trade→nominate(0.7/0.3)→adjudicate→GEPA`,
+      target: cfg.target ? {
+        list: (glob?: string) => cfg.target!.list(glob),
+        read: (path: string, offset = 0, maxBytes = 32768) => cfg.target!.read(path, offset, maxBytes),
+      } : undefined,
       Final: undefined as unknown,
     };
 

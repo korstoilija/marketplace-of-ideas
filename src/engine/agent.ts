@@ -20,6 +20,7 @@ export interface AgentConfig {
   depth?: number;
   onIteration?: (agentId: string, iteration: number) => void;
   recall?: (query: string) => Promise<string>;
+  target?: import("./target.js").TargetJail;
   recordIteration?: (rec: { agentId: string; depth: number; iteration: number; code: string; stdout: string; timedOut: boolean; hasFinal: boolean }) => void;
 }
 
@@ -70,6 +71,7 @@ export class RlmAgent {
       subAgent,
       llm: this.cfg.llm,
       recall: this.cfg.recall,
+      target: this.cfg.target,
       timeoutMs: this.cfg.sandboxTimeoutMs,
     });
 
