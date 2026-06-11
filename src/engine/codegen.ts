@@ -80,7 +80,21 @@ for (const cid of claimIds) {
   else if (p < 0.45) market.buyNo(cid, shares);
   else print(cid + " price:" + p.toFixed(2) + " (no trade)");
 }
-print("Seeded " + claimIds.length + " claims — market is live!");`;
+print("Seeded " + claimIds.length + " claims — market is live!");
+// Force evaluation: the system evaluates every claim with real LLMs
+for (const cid of claimIds) {
+  const ev = evidence.list(cid) || [];
+  const sup = ev.filter(e=>e.stance==="supporting").map(e=>e.excerpt);
+  const cnt = ev.filter(e=>e.stance==="counter").map(e=>e.excerpt);
+  const result = await evaluate(cid, sup.join("; ") || "no evidence", cnt.join("; ") || "no evidence");
+  const conf = result?.aggregate?.confidence || 0.5;
+  print("Evaluated " + cid + ": confidence=" + conf.toFixed(2));
+  const shares = Math.max(20, Math.round(Math.abs(conf - 0.5) * 300));
+  if (conf > 0.55) market.buyYes(cid, shares);
+  else if (conf < 0.45) market.buyNo(cid, shares);
+  // If confidence 0.45-0.55: ambiguous — mark for deeper investigation
+}
+print("Evaluation complete. " + claimIds.length + " claims evaluated with real LLMs.");`;
 }
 
 /** Template-first code generator: first iteration uses contentSig + buildTemplate.

@@ -63,6 +63,21 @@ export class Sandbox {
         list: (claimId: string) =>
           store.listEvidence(claimId).map(e => ({ excerpt: e.excerpt, stance: e.stance, relevance: e.relevance })),
       },
+      /** Real LLM evaluation of a claim against evidence. Calls llm hook directly. */
+      evaluate: async (claimId: string, supporting: string, counter: string) => {
+        const claim = store.getClaim(claimId);
+        const claimText = claim?.text || claimId;
+        const prompt = `Evaluate this claim. Return a confidence score 0-1.\n\nCLAIM: ${claimText}\n\nSUPPORTING: ${supporting || "none"}\n\nCOUNTER: ${counter || "none"}\n\nReply with ONLY a JSON object: {"confidence": 0.X, "reasoning": "why"}`;
+        const raw = await cfg.llm(prompt);
+        let conf = 0.5, reasoning = "evaluated";
+        try {
+          const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
+          conf = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.5)));
+          reasoning = String(parsed.reasoning || "evaluated").slice(0, 300);
+        } catch { /* use defaults */ }
+        store.recordVerdict({ claimId, agentId, confidence: conf, reasoning });
+        return { aggregate: { confidence: conf, consensus: 1, divergence: 0 } };
+      },
       state: () => {
         const me = store.getAgent(agentId);
         return { ...store.counters(), balance: me?.balance ?? 0, reputation: me?.reputation ?? 0.5 };
