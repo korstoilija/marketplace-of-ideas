@@ -386,6 +386,14 @@ export class Store {
         JSON.stringify(ev.filter(e => e.stance === "counter").map(e => e.excerpt)),
         outcome ? 1 : 0, Date.now(),
       );
+
+      // Calibration tracking: record score for all verdicts on this claim
+      const verdicts = this.db.prepare("SELECT agent_id, confidence FROM verdicts WHERE claim_id=?").all(claimId) as Array<{ agent_id: string; confidence: number }>;
+      for (const v of verdicts) {
+        this.db.prepare("INSERT INTO score_ledger (claim_id, agent_id, confidence, outcome, brier, prompt_version, created_at) VALUES (?,?,?,?,?,?,?)").run(
+          claimId, v.agent_id, v.confidence, outcome ? 1 : 0, (v.confidence - (outcome ? 1 : 0)) ** 2, 'v2', Date.now(),
+        );
+      }
     });
     tx();
   }

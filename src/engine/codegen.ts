@@ -144,17 +144,31 @@ for (const cid of claimIds) {
 }
 print("Deliberation complete. " + claimIds.length + " claims evaluated" + (Object.keys(evaluations).length ? " with RLM recursion" : ""));
 
-// OBSERVE PRICES — they tell you what the market thinks
+// ═══ TRADING: two-sided market with price impact ═══
+const trades = [];
 for (const cid of claimIds) {
-  const p = market.price(cid);
-  const sig = p > 0.7 ? "STRONG TRUE" : p < 0.3 ? "STRONG FALSE" : p > 0.55 ? "weak true" : p < 0.45 ? "weak false" : "UNCERTAIN";
-  print(cid + " price=" + p.toFixed(2) + " (" + sig + ")");
+  const conf = evaluations[cid] || 0.5;
+  const before = market.price(cid);
+  const shares = Math.max(10, Math.round(Math.abs(conf - 0.5) * 400));
+  
+  if (conf >= 0.6) { market.buyYes(cid, shares); trades.push({cid, side:'YES', shares, conf, before, after:market.price(cid)}); }
+  else if (conf <= 0.4) { market.buyNo(cid, shares); trades.push({cid, side:'NO', shares, conf, before, after:market.price(cid)}); }
+  else { trades.push({cid, side:'HOLD', shares:0, conf, before, after:before}); }
+}
+print("Traded " + trades.filter(t=>t.shares>0).length + "/" + trades.length + " claims.");
+
+// ═══ LEARNING: price impact shows market response ═══
+for (const t of trades.filter(t=>t.shares>0).slice(0, 5)) {
+  const impact = (t.after - t.before).toFixed(3);
+  const moved = t.before !== t.after ? (t.after > t.before ? '↑' : '↓') : '=';
+  print(t.cid.slice(0,25) + ' ' + t.side + ' ' + t.shares + 'sh @' + t.conf.toFixed(2) + ' ' + moved + impact);
 }
 
-// INCENTIVE: your trades earn reputation if the human later confirms your judgments
-// Check your balance, positions, and reputation — they compound across sessions
-const myPos = market.positions();
-print("My positions: " + myPos.length + " holdings");`;
+// ═══ INSTITUTIONS: reputation, calibration, persistence ═══
+const myState = state();
+print("Balance: " + myState.balance.toFixed(0) + " tokens. Reputation: " + myState.reputation.toFixed(3));
+print("Active markets: " + myState.openMarkets + ". Your positions: " + market.positions().length);
+print("Prices are signals. Being right when others are wrong is how reputation compounds.");`;
 }
 
 /** Per-call code generator: first iteration uses contentSig + buildTemplate.

@@ -326,6 +326,13 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         }
         if (ruling !== "true" && ruling !== "false") return json(res, { error: "ruling must be true|false|skip" }, 400);
         store.applyAdjudication(claimId, ruling === "true");
+        
+        // Calibration tracking: record score for all verdicts on this claim
+        const verdicts = store.db.prepare("SELECT agent_id, confidence, reasoning FROM verdicts WHERE claim_id=?").all(claimId) as Array<{ agent_id: string; confidence: number }>;
+        for (const v of verdicts) {
+          store.recordScore({ claimId, agentId: v.agent_id, confidence: v.confidence, outcome: ruling === "true", promptVersion: 'v2-optimized' });
+        }
+        
         optimizeState.trainingExamples = store.trainingExampleCount();
         _broadcast();
         return json(res, { ok: true, claimId, outcome: ruling });
