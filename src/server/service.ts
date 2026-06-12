@@ -380,7 +380,8 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         try { target = new TargetJail({ root: path }); }
         catch (e) { return json(res, { error: String(e instanceof Error ? e.message : e) }, 400); }
         const files = target.list();
-        const topic = `Enrich this codebase (${files.length} files). Read target files to understand the code. Propose 1 idea with 3 grounded claims. Use target.read() for evidence with provenance. Evaluate each. Trade. Set Final.`;
+        const fileList = files.map(f => f.path).join(", ");
+        const topic = `Enrich this codebase. FILES (only these exist — reference ONLY these): ${fileList}. Propose 1 idea with 3 grounded claims about these specific files.`;
         const setup = traderFactory(2);
         session.start(runSession({
           store, topic,

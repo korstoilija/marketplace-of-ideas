@@ -61,8 +61,12 @@ export class Sandbox {
         positions: () => store.getPositions(agentId),
       },
       evidence: {
-        submit: (claimId: string, excerpt: string, stance: "supporting" | "counter", relevance?: number) =>
-          store.addEvidence({ claimId, excerpt, stance, relevance, submittedBy: agentId }),
+        submit: (claimId: string, excerpt: string, stance: "supporting" | "counter", relevance?: number) => {
+          if (!excerpt || excerpt.length < 5) return 0;
+          // Error messages are real data — treat as counter evidence (the file wasn't found, the call failed)
+          if (excerpt.includes("path not found") || excerpt.includes("target read error")) stance = "counter";
+          return store.addEvidence({ claimId, excerpt, stance, relevance, submittedBy: agentId });
+        },
         list: (claimId: string) =>
           store.listEvidence(claimId).map(e => ({ excerpt: e.excerpt, stance: e.stance, relevance: e.relevance })),
       },

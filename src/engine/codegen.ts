@@ -49,7 +49,7 @@ export const evaluateClaimSig = ax(
 
 /** Content extraction: LLM returns structured {title, claims}, not JavaScript. */
 export const contentSig = ax(
-  "topic:string -> title:string \"specific, under 60 chars, not generic\", claims:string[] \"2-3 specific, falsifiable, actionable claims — no vague statements\"",
+  "topic:string, fileList:string -> title:string \"specific, under 60 chars\", claims:string[] \"2-3 specific claims referencing ONLY files from fileList\"",
 );
 
 /** LLM output -> runnable code: strip ALL non-code content. */
@@ -96,21 +96,10 @@ if (typeof target !== "undefined") {
   }
 }
 
-// Step 1: Gather evidence for each claim — BOTH directions, stance decided by content.
-// recall() is model knowledge, not retrieval: submit it as the stance you asked for,
-// and ask for both sides so the market is not fed one-sided fabrication.
-for (const cid of claimIds) {
-  const claimText = (ideas.get(ideaId)?.claims || []).find(c => c === cid) || cid;
-  const pro = await recall("strongest evidence FOR: " + claimText);
-  if (pro && !pro.includes("error") && !pro.includes("unavailable")) {
-    evidence.submit(cid, pro.slice(0, 300), "supporting");
-  }
-  const con = await recall("strongest evidence AGAINST: " + claimText);
-  if (con && !con.includes("error") && !con.includes("unavailable")) {
-    evidence.submit(cid, con.slice(0, 300), "counter");
-  }
-  print("Evidence gathered for " + cid);
-}
+// Step 1: Only use TARGET READS for evidence — never recall().
+// recall() produces model knowledge without verification, leading to hallucinations.
+// Target reads are the ONLY grounded evidence channel.
+print("Evidence: " + sample.length + " files read, no ungrounded model knowledge used.");
 
 // Step 2: Evaluate each claim with real LLM
 const evaluations = {};
@@ -176,10 +165,10 @@ print("Prices are signals. Being right when others are wrong is how reputation c
  *  Stateless — the outer agent loop tracks which iteration it's on via metadata. */
 export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
   return async (inputs) => {
-    // First iteration: use structured content extraction (no JS generation needed)
+    // First iteration: use structured content extraction with FILE LIST context
     if (!inputs.historyText || inputs.historyText === "(first iteration)") {
       try {
-        const res = await contentSig.forward(llm, { topic: inputs.task });
+        const res = await contentSig.forward(llm, { topic: inputs.task, fileList: inputs.stateMetadata || "" });
         const title = String(res.title ?? "").slice(0, 100) || "Untitled";
         const claims = (Array.isArray(res.claims) ? res.claims : []).filter((c: unknown) => typeof c === "string").slice(0, 3);
         if (claims.length > 0) return buildTemplate(title, claims as string[]);
