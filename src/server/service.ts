@@ -110,12 +110,17 @@ function buildContext(store: Store): string {
   const recentIdeas = store.db.prepare(
     "SELECT id, title, status FROM ideas ORDER BY created_at DESC LIMIT 5"
   ).all() as Array<{ id: string; title: string; status: string }>;
+  const cal = store.calibration();
+  const topAgents = store.db.prepare(
+    "SELECT agent_id, reputation, correct, total FROM agents WHERE total > 0 ORDER BY reputation DESC LIMIT 5"
+  ).all() as Array<{ agent_id: string; reputation: number; correct: number; total: number }>;
   
   return [
     `MARKETPLACE STATE: ${s.ideas} ideas, ${s.claims} claims, ${s.openMarkets} open markets, ${s.resolvedMarkets} resolved.`,
     `Recent ideas: ${recentIdeas.map(i => `${i.title} (${i.status})`).join("; ")}`,
+    `Calibration: ${cal.overall?.toFixed(3) ?? "no data"} (${cal.n} rulings). Being right when others are wrong is how reputation compounds.`,
+    `Top agents: ${topAgents.map(a => `${a.agent_id}: rep=${a.reputation.toFixed(2)} (${a.correct}/${a.total})`).join(", ")}`,
     recentErrors.length ? `Recent errors: ${recentErrors.map(e => e.err.slice(0,60)).join(" | ")}` : "No recent errors.",
-    `Active agents: ${store.listAgents().length}. Vault: ${store.listSessions?.().length ?? 0} sessions recorded.`,
     "",
     "You can explore this state with: ideas.list(), market.price(cid), evidence.list(cid), state().",
     "Use these to examine the actual marketplace before proposing improvements.",
