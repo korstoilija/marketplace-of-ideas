@@ -49,7 +49,7 @@ export const evaluateClaimSig = ax(
 
 /** Content extraction: LLM returns structured {title, claims}, not JavaScript. */
 export const contentSig = ax(
-  "topic:string -> title:string \"short title for the idea\", claims:string[] \"2-3 verifiable claims about the topic\"",
+  "topic:string -> title:string \"specific, under 60 chars, not generic\", claims:string[] \"2-3 specific, falsifiable, actionable claims — no vague statements\"",
 );
 
 /** LLM output -> runnable code: strip ALL non-code content. */

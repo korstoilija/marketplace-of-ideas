@@ -229,6 +229,32 @@ export class Store {
     return (this.db.prepare("SELECT COALESCE(SUM(tokens),0) n FROM budget_ledger WHERE created_at >= ?").get(start.getTime()) as { n: number }).n;
   }
 
+  // ── Score ledger: calibration tracking ──
+  recordScore(entry: { claimId: string; agentId: string; confidence: number; outcome?: boolean; promptVersion?: string }): void {
+    const outcome = entry.outcome;
+    const brier = outcome !== undefined ? (entry.confidence - (outcome ? 1 : 0)) ** 2 : null;
+    this.db.prepare("INSERT INTO score_ledger (claim_id, agent_id, confidence, outcome, brier, prompt_version, created_at) VALUES (?,?,?,?,?,?,?)").run(
+      entry.claimId, entry.agentId, entry.confidence, outcome !== undefined ? (outcome ? 1 : 0) : null, brier, entry.promptVersion || '', Date.now(),
+    );
+  }
+
+  calibration(): { overall: number | null; recent: number | null; n: number } {
+    const rows = this.db.prepare("SELECT brier FROM score_ledger WHERE brier IS NOT NULL ORDER BY id DESC LIMIT 50").all() as Array<{ brier: number }>;
+    if (rows.length === 0) return { overall: null, recent: null, n: 0 };
+    const mean = rows.reduce((s, r) => s + r.brier, 0) / rows.length;
+    const recent = rows.slice(0, Math.min(10, rows.length)).reduce((s, r) => s + r.brier, 0) / Math.min(10, rows.length);
+    return { overall: 1 - mean, recent: 1 - recent, n: rows.length };
+  }
+
+  promptVersions(): Array<{ version: string; n: number; calibration: number }> {
+    const rows = this.db.prepare(`
+      SELECT prompt_version, COUNT(*) as n, AVG(brier) as avg_brier
+      FROM score_ledger WHERE brier IS NOT NULL AND prompt_version != ''
+      GROUP BY prompt_version ORDER BY n DESC
+    `).all() as Array<{ prompt_version: string; n: number; avg_brier: number }>;
+    return rows.map(r => ({ version: r.prompt_version, n: r.n, calibration: 1 - r.avg_brier }));
+  }
+
   // ── Tier 1 items ──
   insertTier1Item(item: { sourceId?: number; text: string; claimsJson: string; maxSimilarity?: number; confidence?: number; coherenceScore?: number; escalated?: boolean; runId?: string }): number {
     const r = this.db.prepare("INSERT INTO tier1_items (source_id, text, claims_json, max_similarity, confidence, coherence_score, escalated, run_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(item.sourceId||null, item.text, item.claimsJson, item.maxSimilarity||null, item.confidence||null, item.coherenceScore||null, item.escalated?1:0, item.runId||'', Date.now());

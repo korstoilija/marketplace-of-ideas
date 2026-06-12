@@ -43,6 +43,16 @@ const TABLES: string[] = [
     run_id TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS score_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL,
+    outcome INTEGER,
+    brier REAL,
+    prompt_version TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS claims (
     id TEXT PRIMARY KEY,
     idea_id TEXT NOT NULL REFERENCES ideas(id),
