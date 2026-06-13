@@ -82,25 +82,21 @@ const PERSONAS = [
 
 function defaultTraderFactory(count: number): ReturnType<TraderFactory> {
   const providers = buildProviders();
-  if (providers.length === 0) throw new Error("no provider API keys set and no CLI traders enabled");
+  if (providers.length === 0) throw new Error("no provider API keys set");
   
-  // Agent pool: persist, select, evolve
-  if (!_pool) _pool = new AgentPool(store!);
-  const active = _pool.listActive();
-  
-  // Spawn new agents if pool is too small
-  if (active.length < count) {
-    for (let i = active.length; i < count + 4; i++) {
-      _pool.spawn(PERSONAS[i % PERSONAS.length], providers[0]?.name || "deepseek");
+  const agents = _pool?.listActive() || [];
+  if ((agents.length || 0) < count) {
+    for (let i = agents.length; i < count + 4; i++) {
+      _pool?.spawn(PERSONAS[i % PERSONAS.length], providers[0]?.name || "deepseek");
     }
   }
   
-  const agents = _pool.listActive();
+  const active = _pool?.listActive() || [];
   const traders: TraderSetup[] = Array.from({ length: count }, (_, i) => {
-    const agent = agents[i % agents.length];
+    const agent = active[i % Math.max(1, active.length)];
     return {
-      agentId: agent.agentId,
-      persona: agent.persona,
+      agentId: agent?.agentId || `trader-${i}`,
+      persona: agent?.persona || PERSONAS[i % PERSONAS.length],
       codegen: makeCodeGenerator(providers[0].llm),
     };
   });
@@ -229,6 +225,9 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
   const { store } = cfg;
   const traderFactory = cfg.traderFactory ?? defaultTraderFactory;
   loadLatestOptimization(store);
+  
+  // Initialize corporation pool at startup
+  _pool = new AgentPool(store);
 
   let _broadcast: () => void;
   const session = new AsyncJob<SessionResult>(() => _broadcast?.());

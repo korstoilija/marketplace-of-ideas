@@ -41,7 +41,7 @@ export class AgentPool {
   /** Charge an agent for an LLM call. Returns false if they can't pay. */
   charge(agentId: string, tokens = this.LLM_COST): boolean {
     const a = this.store.getAgent(agentId);
-    if (!a || a.tokenBalance < tokens) return false;
+    if (!a || a.balance < tokens) return false;
     this.store.db.prepare("UPDATE agents SET balance = balance - ? WHERE agent_id = ?").run(tokens, agentId);
     return true;
   }
@@ -101,7 +101,7 @@ export class AgentPool {
       const agent = this.store.getAgent(a.agentId);
       if (!agent) continue;
       // Death: can't pay for even one LLM call AND no track record
-      if (agent.tokenBalance < this.MIN_BALANCE && agent.reputation < 0.35) {
+      if (agent.balance < this.MIN_BALANCE && agent.reputation < 0.35) {
         this.store.db.prepare("UPDATE agent_configs SET active=0 WHERE agent_id=?").run(a.agentId);
         died.push(a.agentId);
       }
