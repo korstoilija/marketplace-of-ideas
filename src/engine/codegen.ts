@@ -34,6 +34,7 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   await llm(prompt) -> string
   await recall(query) -> string  // knowledge retrieval
   await build(path, content) -> string  // WRITE code to workspace/ — corps can BUILD
+  await debug() -> object  // self-diagnose: balance, reputation, recent logs, calibration
   await test(snippet) -> string   // REPL: test code snippets
   print(...)
   Final = {}

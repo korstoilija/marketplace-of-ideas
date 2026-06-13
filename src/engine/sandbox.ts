@@ -143,6 +143,22 @@ export class Sandbox {
         writeFileSync(fullPath, content);
         return "built: workspace/" + path + " (" + content.length + " chars)";
       },
+      /** DEBUG: corporations inspect the marketplace state and their own performance. */
+      debug: () => {
+        const me = store.getAgent(agentId);
+        const logs = store.db.prepare("SELECT iteration, substr(stdout,1,100) as out FROM agent_iterations WHERE agent_id=? ORDER BY id DESC LIMIT 5").all(agentId) as Array<{ iteration: number; out: string }>;
+        const trades = store.db.prepare("SELECT COUNT(*) as n, SUM(cost) as spent FROM orders WHERE agent_id=?").get(agentId) as { n: number; spent: number };
+        const cal = store.db.prepare("SELECT COUNT(*) as n, AVG(1-brier) as cal FROM score_ledger WHERE agent_id=? AND brier IS NOT NULL").get(agentId) as { n: number; cal: number };
+        return {
+          agent: agentId,
+          balance: me?.balance ?? 0,
+          reputation: me?.reputation ?? 0.5,
+          recentLogs: logs.map(l => `#${l.iteration}: ${l.out}`),
+          trades: trades.n,
+          spent: trades.spent?.toFixed(0) ?? "0",
+          calibration: cal.n > 0 ? cal.cal?.toFixed(3) : "no data",
+        };
+      },
       /** Interactive REPL: test code snippets and see results immediately.
        *  Agents use test() to explore the sandbox API before committing code. */
       test: async (snippet: string) => {
