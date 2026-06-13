@@ -1,6 +1,7 @@
 import { createContext, runInContext, type Context } from "node:vm";
 import type { Store } from "../store/store.js";
 import { TargetJail } from "./target.js";
+import { AgentPool } from "./pool.js";
 
 const TRUNCATE_STDOUT = 1000;
 
@@ -11,6 +12,7 @@ export interface SandboxConfig {
   llm: (prompt: string) => Promise<string>;
   recall?: (query: string) => Promise<string>;
   target?: TargetJail;
+  charge?: (tokens: number) => boolean;  // Corporation pays for LLM calls
   timeoutMs?: number;
 }
 

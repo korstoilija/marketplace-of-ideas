@@ -9,6 +9,7 @@ import type { CodeGenerator, LeafEvaluator } from "../engine/agent.js";
 import { buildProviders, makeCodeGenerator, makeLeafEvaluator, makeLlm } from "../engine/codegen.js";
 import { runGepa, loadLatestOptimization, InsufficientExamplesError, type GepaReport, MIN_EXAMPLES } from "../optimize/gepa.js";
 import { llmSearch } from "../engine/search.js";
+import { AgentPool } from "../engine/pool.js";
 import { computeMetrics } from "./metrics.js";
 import { makeCliCodeGenerator } from "../engine/cli-provider.js";
 import { BudgetGuard } from "../engine/budget.js";
@@ -81,26 +82,32 @@ const PERSONAS = [
 
 function defaultTraderFactory(count: number): ReturnType<TraderFactory> {
   const providers = buildProviders();
-  const cliTraders = (process.env["MP_CLI_TRADERS"] ?? "").split(",").map(s => s.trim()).filter((s): s is "claude" | "codex" => s === "claude" || s === "codex");
-  if (providers.length === 0 && cliTraders.length === 0) throw new Error("no provider API keys set and no CLI traders enabled");
+  if (providers.length === 0) throw new Error("no provider API keys set and no CLI traders enabled");
   
-  const roster = cliTraders.length > 0 
-    ? [...providers.map(p => ({ name: p.name, makeGen: () => makeCodeGenerator(p.llm) })), ...cliTraders.map(k => ({ name: k, makeGen: () => makeCliCodeGenerator(k) }))]
-    : providers.map(p => ({ name: p.name, makeGen: () => makeCodeGenerator(p.llm) }));
+  // Agent pool: persist, select, evolve
+  if (!_pool) _pool = new AgentPool(store!);
+  const active = _pool.listActive();
   
+  // Spawn new agents if pool is too small
+  if (active.length < count) {
+    for (let i = active.length; i < count + 4; i++) {
+      _pool.spawn(PERSONAS[i % PERSONAS.length], providers[0]?.name || "deepseek");
+    }
+  }
+  
+  const agents = _pool.listActive();
   const traders: TraderSetup[] = Array.from({ length: count }, (_, i) => {
-    const r = roster[i % roster.length];
+    const agent = agents[i % agents.length];
     return {
-      agentId: `${r.name}-${PERSONAS[i % PERSONAS.length].split(";")[0].replace(/\s+/g, "-")}`,
-      persona: PERSONAS[i % PERSONAS.length],
-      codegen: r.makeGen(),
+      agentId: agent.agentId,
+      persona: agent.persona,
+      codegen: makeCodeGenerator(providers[0].llm),
     };
   });
-  const primaryLlm = providers.length > 0 ? providers[0].llm : null;
-  const leafEvaluator = primaryLlm ? makeLeafEvaluator(primaryLlm) : async () => ({ confidence: 0.5, reasoning: "no API provider available" });
-  const llm = primaryLlm ? makeLlm(primaryLlm) : async (p: string) => `no API provider available for: ${p}`;
-  return { traders, leafEvaluator, llm };
+  return { traders, leafEvaluator: makeLeafEvaluator(providers[0].llm), llm: makeLlm(providers[0].llm) };
 }
+
+let _pool: AgentPool | null = null;
 
 function buildContext(store: Store): string {
   const s = store.counters();
