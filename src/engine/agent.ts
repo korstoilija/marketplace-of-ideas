@@ -121,6 +121,19 @@ export class RlmAgent {
       const result = await sandbox.execute(code);
       iterations.push({ code, result });
       this.cfg.recordIteration?.({ agentId, depth: this.depth, iteration: i, code, stdout: result.stdout, timedOut: result.timedOut, hasFinal: result.hasFinal });
+
+      // MARS early stopping: if price margin is safe, stop wasting tokens
+      if (i >= 1 && !result.hasFinal) {
+        const allMarkets = store.db.prepare("SELECT claim_id, q_yes, q_no FROM markets WHERE resolution IS NULL").all() as Array<{ claim_id: string; q_yes: number; q_no: number }>;
+        if (allMarkets.length > 0 && allMarkets.every(m => m.q_yes + m.q_no > 0)) {
+          const margins = allMarkets.map(m => Math.abs(m.q_yes / (m.q_yes + m.q_no) - 0.5));
+          const avgMargin = margins.reduce((s, m) => s + m, 0) / margins.length;
+          if (avgMargin > 0.25) {
+            result.hasFinal = true;
+            history.push(`[MARS stop] avg price margin ${avgMargin.toFixed(3)} — sufficient, stopping early`);
+          }
+        }
+      }
       history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);
       const hasError = result.stdout.includes("ERROR") || result.stdout.includes("ReferenceError") || result.stdout.includes("TypeError") || result.stdout.includes("SyntaxError");
       if (hasError) {
