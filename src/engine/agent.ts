@@ -103,6 +103,21 @@ export class RlmAgent {
         continue;
       }
 
+      // Semantic guard: catch variable shadowing + self-reference BEFORE sandbox execution
+      const shadowGlobals = (code.match(/^(?:const|let|var)\s+(evidence|state|ideas|market|target|evaluate|subAgent|recall)\s*=/gm) || []);
+      const selfRef = (code.match(/^(?:const|let|var)\s+(\w+)\s*=\s*\1\s*\(/gm) || []);
+      if (shadowGlobals.length > 0 || selfRef.length > 0) {
+        const parts: string[] = [];
+        if (shadowGlobals.length) parts.push("SHADOWING: " + shadowGlobals.join(", ").slice(0, 120) + " — use DIFFERENT variable names");
+        if (selfRef.length) parts.push("SELF-REF: " + selfRef.join(", ").slice(0, 120) + " — cannot use same name for var and function");
+        history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);
+        history.push(`[out ${i}] ⚠ ${parts.join(" | ")}`.slice(0, HISTORY_ENTRY_CHARS));
+        history.push("FIX: never declare const evidence, const state, const ideas, etc. These are sandbox globals.");
+        iterations.push({ code, result: { stdout: "", stdoutTruncated: parts.join("\n"), error: parts[0], timedOut: false, hasFinal: false } });
+        this.cfg.onIteration?.(agentId, i);
+        continue;
+      }
+
       const result = await sandbox.execute(code);
       iterations.push({ code, result });
       this.cfg.recordIteration?.({ agentId, depth: this.depth, iteration: i, code, stdout: result.stdout, timedOut: result.timedOut, hasFinal: result.hasFinal });
