@@ -28,9 +28,8 @@ export interface SessionResult {
 
 const PRICE_HI = 0.7;
 const PRICE_LO = 0.3;
-const AUTO_ADJUDICATE_PRICE = 0.9; // Claims above this settle automatically — no human needed
 
-/** Nominate claims for human adjudication. Auto-settles extreme-confidence claims. */
+/** Nominate claims for human adjudication. NEVER settles. Adversarial agents challenge consensus. */
 export function scanNominations(store: Store, opts: { stallIterations: number }): void {
   const rows = store.db.prepare(`
     SELECT m.claim_id AS claimId,
@@ -43,15 +42,6 @@ export function scanNominations(store: Store, opts: { stallIterations: number })
   for (const r of rows) {
     if (r.orderCount === 0) continue;
     const price = store.getMarket(r.claimId)!.yesPrice;
-    
-    // Auto-adjudicate extreme-confidence claims — the system learns without human bottleneck
-    if (price >= AUTO_ADJUDICATE_PRICE) {
-      try { store.applyAdjudication(r.claimId, true); continue; } catch {}
-    } else if (price <= 1 - AUTO_ADJUDICATE_PRICE) {
-      try { store.applyAdjudication(r.claimId, false); continue; } catch {}
-    }
-    
-    // Nominate mid-confidence claims for human review
     if (price >= PRICE_HI || price <= PRICE_LO) {
       store.nominate(r.claimId, "threshold");
     } else if (r.lastIteration !== null && store.currentIteration - r.lastIteration >= opts.stallIterations) {

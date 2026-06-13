@@ -75,7 +75,7 @@ const PERSONAS = [
   "ruthless skeptic; you demand evidence and bet against hype",
   "enthusiastic generalist; you hunt for upside others miss",
   "careful empiricist; you only trust verifiable specifics",
-  "contrarian; you probe whatever the market already believes",
+  "contrarian; you probe whatever the market already believes — being right when others are wrong is how you earn 10x",
   "synthesizer; you connect claims across ideas",
 ];
 
@@ -349,7 +349,7 @@ export async function startService(cfg: ServiceConfig): Promise<Service> {
         const body = await readBody(req);
         const topic = String(body["topic"] ?? "").trim();
         if (!topic) return json(res, { error: "topic required" }, 400);
-        const count = Math.min(5, Math.max(1, Number(body["traders"] ?? 3)));
+        const count = Math.min(5, Math.max(3, Number(body["traders"] ?? 3)));
         const maxIterations = Math.min(20, Math.max(1, Number(body["maxIterations"] ?? 8)));
 
         let setup: ReturnType<TraderFactory>;
