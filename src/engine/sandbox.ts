@@ -134,6 +134,15 @@ export class Sandbox {
         list: (glob?: string) => { try { return cfg.target!.list(glob); } catch(e) { return []; } },
         read: (path: string, offset = 0, maxBytes = 32768) => { try { return cfg.target!.read(path, offset, maxBytes); } catch(e) { return "target read error: " + (e instanceof Error ? e.message : String(e)); } },
       } : undefined,
+      /** BUILD: corporations write code, not just observe. Writes to workspace/ dir. */
+      build: (path: string, content: string) => {
+        const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+        const { join, dirname } = require("node:path") as typeof import("node:path");
+        const fullPath = join(process.cwd(), "workspace", path);
+        try { mkdirSync(dirname(fullPath), { recursive: true }); } catch {}
+        writeFileSync(fullPath, content);
+        return "built: workspace/" + path + " (" + content.length + " chars)";
+      },
       /** Interactive REPL: test code snippets and see results immediately.
        *  Agents use test() to explore the sandbox API before committing code. */
       test: async (snippet: string) => {

@@ -72,7 +72,7 @@ export class AgentPool {
     const gen = parentId
       ? ((this.store.db.prepare("SELECT generation FROM agent_configs WHERE agent_id=?").get(parentId) as { generation: number } | undefined)?.generation ?? 0) + 1
       : 0;
-    const agentId = `${provider}-g${gen}-${Date.now().toString(36)}`;
+    const agentId = `${provider}-g${gen}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
     this.store.ensureAgent(agentId, this.SPINUP_CAPITAL);
     this.store.db.prepare(
       "INSERT INTO agent_configs (agent_id, persona, provider, prompt_version, parent_id, generation, active, created_at) VALUES (?,?,?,?,?,?,1,?)",

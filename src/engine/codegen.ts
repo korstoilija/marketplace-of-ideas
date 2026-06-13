@@ -32,8 +32,9 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   state() -> {ideas,claims,openMarkets,balance,reputation}
   await subAgent(prompt) -> verdict
   await llm(prompt) -> string
-  await recall(query) -> string  // knowledge retrieval, returns evidence snippets
-  await test(snippet) -> string   // REPL: test code snippets, see results immediately
+  await recall(query) -> string  // knowledge retrieval
+  await build(path, content) -> string  // WRITE code to workspace/ — corps can BUILD
+  await test(snippet) -> string   // REPL: test code snippets
   print(...)
   Final = {}
 
