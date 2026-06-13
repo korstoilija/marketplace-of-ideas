@@ -1,0 +1,309 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Forest</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, Helvetica, sans-serif; }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 16px;
+            border-radius: 8px;
+            pointer-events: none;
+            user-select: none;
+            font-size: 14px;
+        }
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            user-select: none;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        #blocker span {
+            background: rgba(0,0,0,0.6);
+            padding: 20px 40px;
+            border-radius: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="info">🌲 Infinite Forest | WASD move | Mouse look</div>
+    <div id="blocker"><span>Click to explore</span></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Setup scene, camera, renderer ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // sky blue
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.7, 0); // eye height
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lights ---
+        const ambientLight = new THREE.AmbientLight(0x404060);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+        dirLight.position.set(50, 100, 50);
+        scene.add(dirLight);
+        const fillLight = new THREE.DirectionalLight(0xccddff, 0.4);
+        fillLight.position.set(-50, 30, -50);
+        scene.add(fillLight);
+
+        // --- Ground (green) ---
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a7d3a });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.05;
+        scene.add(ground);
+
+        // --- Tree parameters ---
+        const treeGroup = new THREE.Group();
+        scene.add(treeGroup);
+
+        const treePositions = new Map(); // key: "x,z" -> {x, z, mesh}
+        const VISIBLE_RADIUS = 40;
+        const SPAWN_RADIUS = 35;
+        const DESPAWN_RADIUS = 50;
+        const TREE_SPACING = 5; // minimum distance between trees
+
+        // Create a single tree mesh (reusable)
+        function createTreeMesh() {
+            const group = new THREE.Group();
+
+            // Trunk
+            const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d3a1a });
+            const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 1.8);
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = 0.9;
+            group.add(trunk);
+
+            // Foliage (3 layers)
+            const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d7a2d });
+            const leafMatLight = new THREE.MeshLambertMaterial({ color: 0x4a9e4a });
+
+            const leaf1 = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.2, 6), leafMat);
+            leaf1.position.y = 1.8;
+            group.add(leaf1);
+
+            const leaf2 = new THREE.Mesh(new THREE.ConeGeometry(0.8, 1.0, 6), leafMatLight);
+            leaf2.position.y = 2.6;
+            group.add(leaf2);
+
+            const leaf3 = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.8, 6), leafMat);
+            leaf3.position.y = 3.3;
+            group.add(leaf3);
+
+            return group;
+        }
+
+        const treeTemplate = createTreeMesh();
+
+        // --- Helper functions ---
+        function posKey(x, z) {
+            return `${Math.round(x * 10)},${Math.round(z * 10)}`;
+        }
+
+        function spawnTreeAt(x, z) {
+            const key = posKey(x, z);
+            if (treePositions.has(key)) return;
+
+            // Clone the template
+            const mesh = treeTemplate.clone();
+            mesh.position.set(x, 0, z);
+            // Random rotation
+            mesh.rotation.y = Math.random() * Math.PI * 2;
+            // Random scale variation
+            const scale = 0.8 + Math.random() * 0.5;
+            mesh.scale.set(scale, scale, scale);
+
+            treeGroup.add(mesh);
+            treePositions.set(key, { x, z, mesh });
+        }
+
+        function despawnTree(key) {
+            const entry = treePositions.get(key);
+            if (entry) {
+                treeGroup.remove(entry.mesh);
+                treePositions.delete(key);
+            }
+        }
+
+        // --- Procedural spawning around player ---
+        function updateForest(playerX, playerZ) {
+            // Determine grid cells to check (simple grid with spacing)
+            const gridStep = 4; // step size for candidate positions
+            const minX = Math.floor((playerX - SPAWN_RADIUS) / gridStep) * gridStep;
+            const maxX = Math.ceil((playerX + SPAWN_RADIUS) / gridStep) * gridStep;
+            const minZ = Math.floor((playerZ - SPAWN_RADIUS) / gridStep) * gridStep;
+            const maxZ = Math.ceil((playerZ + SPAWN_RADIUS) / gridStep) * gridStep;
+
+            // Spawn new trees
+            for (let x = minX; x <= maxX; x += gridStep) {
+                for (let z = minZ; z <= maxZ; z += gridStep) {
+                    const dx = x - playerX;
+                    const dz = z - playerZ;
+                    const dist = Math.sqrt(dx*dx + dz*dz);
+                    if (dist < SPAWN_RADIUS && dist > 1.5) {
+                        // Add some randomness to avoid perfect grid
+                        const jitter = 0.8;
+                        const jx = x + (Math.random() - 0.5) * jitter;
+                        const jz = z + (Math.random() - 0.5) * jitter;
+                        // Check minimum distance to player
+                        const ddx = jx - playerX;
+                        const ddz = jz - playerZ;
+                        if (Math.sqrt(ddx*ddx + ddz*ddz) < 2.0) continue;
+                        // Check if too close to existing trees (simple)
+                        const key = posKey(jx, jz);
+                        if (!treePositions.has(key)) {
+                            // Additional check: avoid clustering (skip some randomly)
+                            if (Math.random() < 0.6) {
+                                spawnTreeAt(jx, jz);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Despawn far trees
+            const toDelete = [];
+            for (const [key, entry] of treePositions) {
+                const dx = entry.x - playerX;
+                const dz = entry.z - playerZ;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if (dist > DESPAWN_RADIUS) {
+                    toDelete.push(key);
+                }
+            }
+            for (const key of toDelete) {
+                despawnTree(key);
+            }
+        }
+
+        // Initial spawn around (0,0)
+        updateForest(0, 0);
+
+        // --- Pointer Lock controls ---
+        const blocker = document.getElementById('blocker');
+        let isLocked = false;
+
+        blocker.addEventListener('click', () => {
+            renderer.domElement.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = document.pointerLockElement === renderer.domElement;
+            blocker.style.display = isLocked ? 'none' : 'flex';
+        });
+
+        // Movement state
+        const keys = { w: false, a: false, s: false, d: false };
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'w' || e.key === 'a' || e.key === 's' || e.key === 'd') {
+                keys[e.key] = true;
+                e.preventDefault();
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'w' || e.key === 'a' || e.key === 's' || e.key === 'd') {
+                keys[e.key] = false;
+                e.preventDefault();
+            }
+        });
+
+        // Mouse look
+        let yaw = 0;
+        let pitch = 0;
+        document.addEventListener('mousemove', (e) => {
+            if (!isLocked) return;
+            const sensitivity = 0.002;
+            yaw -= e.movementX * sensitivity;
+            pitch -= e.movementY * sensitivity;
+            pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+        });
+
+        // --- Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Game loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            const delta = clock.getDelta();
+            const speed = 8.0; // units per second
+
+            // Movement
+            if (isLocked) {
+                const forward = new THREE.Vector3(0, 0, -1);
+                const right = new THREE.Vector3(1, 0, 0);
+                // Apply yaw rotation
+                forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                right.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+                const moveDir = new THREE.Vector3(0, 0, 0);
+                if (keys.w) moveDir.add(forward);
+                if (keys.s) moveDir.sub(forward);
+                if (keys.a) moveDir.sub(right);
+                if (keys.d) moveDir.add(right);
+
+                if (moveDir.length() > 0) {
+                    moveDir.normalize();
+                    camera.position.add(moveDir.multiplyScalar(speed * delta));
+                }
+            }
+
+            // Update camera rotation
+            const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+            camera.quaternion.setFromEuler(euler);
+
+            // Update forest around player
+            updateForest(camera.position.x, camera.position.z);
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        // Initial spawn more trees around player after a moment
+        setTimeout(() => {
+            updateForest(camera.position.x, camera.position.z);
+        }, 100);
+    </script>
+</body>
+</html>
+```
