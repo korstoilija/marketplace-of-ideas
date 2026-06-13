@@ -91,8 +91,8 @@ export class RlmAgent {
         new Promise<string>((_, reject) => setTimeout(() => reject(new Error("codegen timed out after 120s")), 120_000)),
       ]);
 
-      // Validate syntax BEFORE execution — catch errors early, feed back to agent
-      try { new Script(code); }
+      // Validate syntax BEFORE execution — wrap in async IIFE to match sandbox
+      try { new Script('(async () => {' + code + '})()'); }
       catch (syntaxErr) {
         const msg = syntaxErr instanceof Error ? syntaxErr.message : String(syntaxErr);
         history.push(`[code ${i}] ${code.slice(0, HISTORY_ENTRY_CHARS)}`);

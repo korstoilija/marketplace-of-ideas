@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tree Climber</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 8px 16px; border-radius: 4px; pointer-events: none; z-index: 10; }
+  #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 24px; pointer-events: none; z-index: 10; opacity: 0.5; }
+</style>
+</head>
+<body>
+<div id="info">WASD - Move | Space - Jump/Climb | Mouse - Look</div>
+<div id="crosshair">+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// --- Setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // Sky blue
+scene.fog = new THREE.Fog(0x87CEEB, 50, 100);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(0, 2, 5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const ambientLight = new THREE.AmbientLight(0x404060);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+sunLight.position.set(20, 30, 10);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 2048;
+sunLight.shadow.mapSize.height = 2048;
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 60;
+sunLight.shadow.camera.left = -30;
+sunLight.shadow.camera.right = 30;
+sunLight.shadow.camera.top = 30;
+sunLight.shadow.camera.bottom = -30;
+scene.add(sunLight);
+
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+fillLight.position.set(-10, 10, -10);
+scene.add(fillLight);
+
+// --- Ground (for reference, but tree is main) ---
+const groundGeo = new THREE.PlaneGeometry(200, 200);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.8 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.5;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// --- Tree System ---
+// Procedural tree: trunk + branches that branch recursively
+// We'll generate branches as the player climbs higher
+
+const treeGroup = new THREE.Group();
+scene.add(treeGroup);
+
+// Materials
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.9 });
+const branchMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.8 });
+const leafMat = new THREE.MeshStandardMaterial({ color: 0x3a7d3a, roughness: 0.6, emissive: new THREE.Color(0x1a4d1a), emissiveIntensity: 0.1 });
+
+// Parameters
+const TRUNK_HEIGHT = 3;
+const TRUNK_RADIUS = 0.4;
+const BRANCH_LENGTH_MIN = 1.5;
+const BRANCH_LENGTH_MAX = 3.5;
+const BRANCH_RADIUS = 0.12;
+const BRANCH_ANGLE_SPREAD = 0.8; // radians
+const BRANCH_DENSITY = 4; // branches per level
+const LEVEL_HEIGHT = 2.5;
+const MAX_LEVELS = 50; // effectively infinite
+
+// Store branch meshes for collision
+const branchMeshes = [];
+
+// Generate trunk
+function createTrunk() {
+  const geo = new THREE.CylinderGeometry(TRUNK_RADIUS * 0.7, TRUNK_RADIUS, TRUNK_HEIGHT, 8);
+  const mesh = new THREE.Mesh(geo, trunkMat);
+  mesh.position.y = TRUNK_HEIGHT / 2;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  treeGroup.add(mesh);
+  return mesh;
+}
+
+// Generate a branch at given position and angle
+function createBranch(pos, angleY, angleX, length, radius) {
+  const geo = new THREE.CylinderGeometry(radius * 0.5, radius, length, 6);
+  const mesh = new THREE.Mesh(geo, branchMat);
+  
+  // Position at the branch point
+  mesh.position.copy(pos);
+  
+  // Rotate: first around Y (horizontal direction), then around local X (upward angle)
+  const quat = new THREE.Quaternion();
+  const euler = new THREE.Euler(angleX, angleY, 0, 'YXZ');
+  quat.setFromEuler(euler);
+  mesh.quaternion.copy(quat);
+  
+  // Move the branch forward along its local axis so it extends from the trunk
+  const forward = new THREE.Vector3(0, 1, 0);
+  forward.applyQuaternion(quat);
+  mesh.position.add(forward.multiplyScalar(length / 2));
+  
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  treeGroup.add(mesh);
+  
+  // Add leaf clump at end
+  const leafSize = 0.4 + Math.random() * 0.3;
+  const leafGeo = new THREE.SphereGeometry(leafSize, 4, 4);
+  const leafMesh = new THREE.Mesh(leafGeo, leafMat);
+  leafMesh.position.copy(mesh.position);
+  leafMesh.position.add(forward.clone().multiplyScalar(length / 2));
+  leafMesh.castShadow = true;
+  treeGroup.add(leafMesh);
+  
+  return mesh;
+}
+
+// Generate a level of branches
+function generateLevel(yPos, level) {
+  const numBranches = BRANCH_DENSITY + Math.floor(Math.random() * 2);
+  for (let i = 0; i < numBranches; i++) {
+    const angleY = (i / numBranches) * Math.PI * 2 + Math.random() * 0.3;
+    const angleX = Math.PI / 2 - (0.3 + Math.random() * 0.4); // upward angle
+    const length = BRANCH_LENGTH_MIN + Math.random() * (BRANCH_LENGTH_MAX - BRANCH_LENGTH_MIN);
+    const radius = BRANCH_RADIUS * (1 + Math.random() * 0.3);
+    
+    const pos = new THREE.Vector3(0, yPos, 0);
+    const mesh = createBranch(pos, angleY, angleX, length, radius);
+    branchMeshes.push(mesh);
+  }
+}
+
+// Generate initial tree
+const trunk = createTrunk();
+let currentMaxY = TRUNK_HEIGHT;
+
+// Generate first few levels
+for (let level = 0; level < 3; level++) {
+  const yPos = TRUNK_HEIGHT * 0.3 + level * LEVEL_HEIGHT;
+  generateLevel(yPos, level);
+  currentMaxY = yPos + LEVEL_HEIGHT;
+}
+
+// Function to generate more branches above
+function generateMoreBranches(playerY) {
+  while (currentMaxY < playerY + 15) {
+    const yPos = currentMaxY + LEVEL_HEIGHT * 0.5;
+    generateLevel(yPos, Math.floor(yPos / LEVEL_HEIGHT));
+    currentMaxY = yPos + LEVEL_HEIGHT;
+    
+    // Also extend trunk visually
+    const trunkExt = new THREE.Mesh(
+      new THREE.CylinderGeometry(TRUNK_RADIUS * 0.6, TRUNK_RADIUS * 0.7, LEVEL_HEIGHT, 8),
+      trunkMat
+    );
+    trunkExt.position.y = yPos - LEVEL_HEIGHT * 0.3;
+    trunkExt.castShadow = true;
+    trunkExt.receiveShadow = true;
+    treeGroup.add(trunkExt);
+  }
+}
+
+// --- Player ---
+const player = {
+  position: new THREE.Vector3(0, 2, 0),
+  velocity: new THREE.Vector3(0, 0, 0),
+  onGround: false,
+  isClimbing: false,
+  climbTarget: null,
+  height: 1.7,
+  radius: 0.3,
+  speed: 4,
+  jumpForce: 6,
+  gravity: -15,
+  yaw: 0,
+  pitch: 0
+};
+
+// Collision detection with branches
+function checkBranchCollision(pos, radius) {
+  for (const mesh of branchMeshes) {
+    // Simple sphere-cylinder collision
+    const branchPos = mesh.position.clone();
+    const branchQuat = mesh.quaternion.clone();
+    const branchLength = mesh.geometry.parameters.height || 2;
+    const branchRadius = mesh.geometry.parameters.radiusTop || 0.12;
+    
+    // Transform player position to branch local space
+    const localPos = pos.clone().sub(branchPos);
+    const invQuat = branchQuat.clone().invert();
+    localPos.applyQuaternion(invQuat);
+    
+    // Check if within cylinder bounds
+    const halfHeight = branchLength / 2;
+    if (Math.abs(localPos.y) < halfHeight + radius) {
+      const dist = Math.sqrt(localPos.x * localPos.x + localPos.z * localPos.z);
+      if (dist < branchRadius + radius) {
+        return { collided: true, mesh, normal: new THREE.Vector3(localPos.x, 0, localPos.z).normalize() };
+      }
+    }
+  }
+  return { collided: false };
+}
+
+// Check if player is on top of a branch (for standing)
+function checkBranchTop(pos, radius) {
+  for (const mesh of branchMeshes) {
+    const branchPos = mesh.position.clone();
+    const branchQuat = mesh.quaternion.clone();
+    const branchLength = mesh.geometry.parameters.height || 2;
+    const branchRadius = mesh.geometry.parameters.radiusTop || 0.12;
+    
+    const localPos = pos.clone().sub(branchPos);
+    const invQuat = branchQuat.clone().invert();
+    localPos.applyQuaternion(invQuat);
+    
+    const halfHeight = branchLength / 2;
+    // Check if directly above the branch
+    if (Math.abs(localPos.x) < branchRadius + radius && Math.abs(localPos.z) < branchRadius + radius) {
+      if (localPos.y > halfHeight - 0.1 && localPos.y < halfHeight + 0.5) {
+        return { onTop: true, mesh, topY: branchPos.y + halfHeight };
+      }
+    }
+  }
+  return { onTop: false };
+}
+
+// Controls
+const keys = {};
+document.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+document.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+// Mouse look
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement === renderer.domElement) {
+    player.yaw -= e.movementX * 0.002;
+    player.pitch -= e.movementY * 0.002;
+    player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch));
+  }
+});
+
+renderer.domElement.addEventListener('click', () => {
+  renderer.domElement.requestPointerLock();
+});
+
+// --- Game Loop ---
+const clock = new THREE.Clock();
+
+function update(delta) {
+  // Generate more branches as player climbs
+  generateMoreBranches(player.position.y);
+  
+  // Movement direction
+  const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+  
+  let moveX = 0;
+  let moveZ = 0;
+  if (keys['w']) { moveX += forward.x; moveZ += forward.z; }
+  if (keys['s']) { moveX -= forward.x; moveZ -= forward.z; }
+  if (keys['a']) { moveX -= right.x; moveZ -= right.z; }
+  if (keys['d']) { moveX += right.x; moveZ += right.z; }
+  
+  // Normalize horizontal movement
+  const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+  if (moveLen > 0) {
+    moveX /= moveLen;
+    moveZ /= moveLen;
+  }
+  
+  // Apply horizontal velocity
+  player.velocity.x = moveX * player.speed;
+  player.velocity.z = moveZ * player.speed;
+  
+  // Gravity
+  if (!player.onGround) {
+    player.velocity.y += player.gravity * delta;
+  }
+  
+  // Jump / Climb
+  if (keys[' '] && player.onGround) {
+    player.velocity.y = player.jumpForce;
+    player.onGround = false;
+  }
+  
+  // Climb mechanic: if space pressed and near a branch above, pull up
+  if (keys[' '] && !player.onGround && player.velocity.y < 0) {
+    // Check if there's a branch above to grab
+    const grabCheck = checkBranchCollision(
+      new THREE.Vector3(player.position.x, player.position.y + player.height + 0.3, player.position.z),
+      player.radius
+    );
+    if (grabCheck.collided) {
+      // Pull up
+      player.velocity.y = player.jumpForce * 0.6;
+      player.onGround = false;
+    }
+  }
+  
+  // Update position
+  const newPos = player.position.clone();
+  newPos.x += player.velocity.x * delta;
+  newPos.y += player.velocity.y * delta;
+  newPos.z += player.velocity.z * delta;
+  
+  // Collision detection with branches
+  const collision = checkBranchCollision(newPos, player.radius);
+  if (collision.collided) {
+    // Push player out
+    const pushDir = collision.normal;
+    newPos.x += pushDir.x * 0.1;
+    newPos.z += pushDir.z * 0.1;
+    player.velocity.x *= 0.5;
+    player.velocity.z *= 0.5;
+  }
+  
+  // Check if standing on a branch
+  const onTop = checkBranchTop(newPos, player.radius);
+  if (onTop.onTop && player.velocity.y <= 0) {
+    newPos.y = onTop.topY + 0.1;
+    player.velocity.y = 0;
+    player.onGround = true;
+  } else {
+    // Check ground
+    if (newPos.y < 0.5) {
+      newPos.y = 0.5;
+      player.velocity.y = 0;
+      player.onGround = true;
+    } else {
+      player.onGround = false;
+    }
+  }
+  
+  player.position.copy(newPos);
+  
+  // Update camera
+  camera.position.copy(player.position);
+  camera.position.y += player.height * 0.8;
+  
+  const lookDir = new THREE.Vector3(
+    -Math.sin(player.yaw) * Math.cos(player.pitch),
+    Math.sin(player.pitch),
+    -Math.cos(player.yaw) * Math.cos(player.pitch)
+  );
+  camera.lookAt(camera.position.clone().add(lookDir));
+}
+
+function animate() {
+  const delta = Math.min(clock.getDelta(), 0.05);
+  update(delta);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+animate();
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+console.log('Tree Climber started!');
+</script>
+</body>
+</html>
