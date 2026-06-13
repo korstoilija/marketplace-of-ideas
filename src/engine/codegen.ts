@@ -76,107 +76,20 @@ export function buildTemplate(title: string, claims: string[]): string {
   const escapedClaims = JSON.stringify(claims);
   return `// RLM DELIBERATION PROTOCOL
 const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
-print("Seeded " + claimIds.length + " claims.");
+print("Proposed " + claimIds.length + " claims.");
 
-// Step 0: If target is available, read a DIVERSE sample of files for grounded evidence
-if (typeof target !== "undefined") {
-  const allFiles = target.list();
-  // Pick files from different directories for diversity
-  const dirs = [...new Set(allFiles.map(f => f.path.split("/")[0]))];
-  const sample = [];
-  for (const dir of dirs.slice(0, 4)) {
-    const dirFiles = allFiles.filter(f => f.path.startsWith(dir + "/")).slice(0, 2);
-    sample.push(...dirFiles);
-  }
-  if (sample.length === 0) sample.push(...allFiles.slice(0, 8));
-  for (const f of sample) {
-    try {
-      const chunk = target.read(f.path, 0, 2000);
-      print("TARGET: " + f.path + " (" + chunk.length + " chars)");
-      evidence.submit(claimIds[0], "target:" + f.path + ": " + chunk.slice(0, 300), "supporting");
-    } catch(e) { print("target read failed: " + f.path); }
-  }
-}
-
-// Step 1: Only use TARGET READS for evidence — never recall().
-// recall() produces model knowledge without verification, leading to hallucinations.
-// Target reads are the ONLY grounded evidence channel.
-print("Evidence: " + sample.length + " files read, no ungrounded model knowledge used.");
-
-// Step 2: Evaluate each claim with real LLM
-const evaluations = {};
 for (const cid of claimIds) {
-  const ev = evidence.list(cid) || [];
-  const sup = ev.filter(e => e.stance === "supporting").map(e => e.excerpt);
-  const cnt = ev.filter(e => e.stance === "counter").map(e => e.excerpt);
-  const result = await evaluate(cid, sup.join("; ") || "no evidence", cnt.join("; ") || "no evidence");
+  const result = await evaluate(cid, "evidence for", "evidence against");
   const conf = result?.aggregate?.confidence || 0.5;
-  evaluations[cid] = conf;
   print("Evaluated " + cid + ": confidence=" + conf.toFixed(2));
-  
-  // Step 3: RLM RECURSION — for ambiguous claims, decompose further
-  if (conf >= 0.35 && conf <= 0.65) {
-    print("Ambiguous claim — spawning sub-agent for deeper analysis: " + cid);
-    try {
-      const deep = await subAgent("Decompose this ambiguous claim into sub-claims and evaluate each: " + cid);
-      if (deep && deep.confidence !== undefined) {
-        evaluations[cid] = deep.confidence;
-        print("After decomposition: " + cid + " confidence=" + deep.confidence.toFixed(2));
-      }
-    } catch(e) { print("Sub-agent unavailable: " + cid); }
-  }
-  
-  // Step 4: Trade based on evaluation confidence
-  const finalConf = evaluations[cid];
-  const shares = Math.max(20, Math.round(Math.abs(finalConf - 0.5) * 300));
-  if (finalConf > 0.55) market.buyYes(cid, shares);
-  else if (finalConf < 0.45) market.buyNo(cid, shares);
-  else print(cid + " remains ambiguous despite recursion");
-}
-print("Deliberation complete. " + claimIds.length + " claims evaluated" + (Object.keys(evaluations).length ? " with RLM recursion" : ""));
-
-// ═══ TRADING: two-sided market with price impact ═══
-const trades = [];
-for (const cid of claimIds) {
-  const conf = evaluations[cid] || 0.5;
+  const shares = Math.max(10, Math.round(Math.abs(conf - 0.5) * 300));
   const before = market.price(cid);
-  const shares = Math.max(10, Math.round(Math.abs(conf - 0.5) * 400));
-  
-  if (conf >= 0.6) { market.buyYes(cid, shares); trades.push({cid, side:'YES', shares, conf, before, after:market.price(cid)}); }
-  else if (conf <= 0.4) { market.buyNo(cid, shares); trades.push({cid, side:'NO', shares, conf, before, after:market.price(cid)}); }
-  else { trades.push({cid, side:'HOLD', shares:0, conf, before, after:before}); }
+  if (conf > 0.55) { market.buyYes(cid, shares); print("  Bought YES " + shares + "sh"); }
+  else if (conf < 0.45) { market.buyNo(cid, shares); print("  Bought NO " + shares + "sh"); }
+  else { print("  Holding — market uncertain"); }
 }
-print("Traded " + trades.filter(t=>t.shares>0).length + "/" + trades.length + " claims.");
-
-// ═══ LEARNING: price impact shows market response ═══
-for (const t of trades.filter(t=>t.shares>0).slice(0, 5)) {
-  const impact = (t.after - t.before).toFixed(3);
-  const moved = t.before !== t.after ? (t.after > t.before ? '↑' : '↓') : '=';
-  print(t.cid.slice(0,25) + ' ' + t.side + ' ' + t.shares + 'sh @' + t.conf.toFixed(2) + ' ' + moved + impact);
-}
-
-// ═══ INSTITUTIONS: reputation, calibration, persistence ═══
-const myState = state();
-print("Balance: " + myState.balance.toFixed(0) + " tokens. Reputation: " + myState.reputation.toFixed(3));
-print("Active markets: " + myState.openMarkets + ". Your positions: " + market.positions().length);
-print("Prices are signals. Being right when others are wrong is how reputation compounds.");
-
-// ═══ MARKET-DRIVEN BUILD: prices decide what to build ═══
-// Only build features the market has priced above 0.7 (consensus: needed)
-// Features below 0.3 are actively rejected. Features near 0.5 are contested — skip.
-const strongFeatures = [];
-for (const cid of claimIds) {
-  const p = market.price(cid);
-  if (p > 0.7) { strongFeatures.push(cid + ": NEEDED (price=" + p.toFixed(2) + ")"); }
-  else if (p < 0.3) { print(cid + " REJECTED by market (price=" + p.toFixed(2) + ")"); }
-  else { print(cid + " CONTESTED (price=" + p.toFixed(2) + ") — market uncertain, skip"); }
-}
-if (strongFeatures.length > 0) {
-  const prompt = "Generate code implementing these features that the market has validated as needed: " + JSON.stringify(strongFeatures) + ". Return ONLY the code, no explanations, no markdown fences.";
-  const code = await llm(prompt);
-  if (code && code.length > 50) { const result = build("output.html", code); print("MARKET-DRIVEN BUILD: " + result); }
-  else { print("Build skipped — generated code too short"); }
-} else { print("Build skipped — no features met market threshold (price > 0.7)"); }`;
+print("Deliberation complete. " + claimIds.length + " claims evaluated and traded.");
+`;
 }
 
 /** Per-call code generator: first iteration uses contentSig + buildTemplate.
