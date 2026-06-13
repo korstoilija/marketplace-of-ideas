@@ -158,7 +158,24 @@ for (const t of trades.filter(t=>t.shares>0).slice(0, 5)) {
 const myState = state();
 print("Balance: " + myState.balance.toFixed(0) + " tokens. Reputation: " + myState.reputation.toFixed(3));
 print("Active markets: " + myState.openMarkets + ". Your positions: " + market.positions().length);
-print("Prices are signals. Being right when others are wrong is how reputation compounds.");`;
+print("Prices are signals. Being right when others are wrong is how reputation compounds.");
+
+// ═══ MARKET-DRIVEN BUILD: prices decide what to build ═══
+// Only build features the market has priced above 0.7 (consensus: needed)
+// Features below 0.3 are actively rejected. Features near 0.5 are contested — skip.
+const strongFeatures = [];
+for (const cid of claimIds) {
+  const p = market.price(cid);
+  if (p > 0.7) { strongFeatures.push(cid + ": NEEDED (price=" + p.toFixed(2) + ")"); }
+  else if (p < 0.3) { print(cid + " REJECTED by market (price=" + p.toFixed(2) + ")"); }
+  else { print(cid + " CONTESTED (price=" + p.toFixed(2) + ") — market uncertain, skip"); }
+}
+if (strongFeatures.length > 0) {
+  const prompt = "Generate code implementing these features that the market has validated as needed: " + JSON.stringify(strongFeatures) + ". Return ONLY the code, no explanations, no markdown fences.";
+  const code = await llm(prompt);
+  if (code && code.length > 50) { const result = build("output.html", code); print("MARKET-DRIVEN BUILD: " + result); }
+  else { print("Build skipped — generated code too short"); }
+} else { print("Build skipped — no features met market threshold (price > 0.7)"); }`;
 }
 
 /** Per-call code generator: first iteration uses contentSig + buildTemplate.
