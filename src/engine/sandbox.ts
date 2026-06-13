@@ -2,6 +2,8 @@ import { createContext, runInContext, type Context } from "node:vm";
 import type { Store } from "../store/store.js";
 import { TargetJail } from "./target.js";
 import { AgentPool } from "./pool.js";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 const TRUNCATE_STDOUT = 1000;
 
@@ -134,10 +136,8 @@ export class Sandbox {
         list: (glob?: string) => { try { return cfg.target!.list(glob); } catch(e) { return []; } },
         read: (path: string, offset = 0, maxBytes = 32768) => { try { return cfg.target!.read(path, offset, maxBytes); } catch(e) { return "target read error: " + (e instanceof Error ? e.message : String(e)); } },
       } : undefined,
-      /** BUILD: corporations write code, not just observe. Writes to workspace/ dir. */
+      /** BUILD: corporations write code, not just observe. */
       build: (path: string, content: string) => {
-        const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
-        const { join, dirname } = require("node:path") as typeof import("node:path");
         const fullPath = join(process.cwd(), "workspace", path);
         try { mkdirSync(dirname(fullPath), { recursive: true }); } catch {}
         writeFileSync(fullPath, content);
