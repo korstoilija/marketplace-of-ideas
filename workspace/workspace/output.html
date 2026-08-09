@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Click the Bouncing Ball</title>
+<style>
+  body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #222; font-family: Arial, sans-serif; }
+  .container { text-align: center; }
+  canvas { border: 2px solid #fff; background: #000; cursor: pointer; }
+  #score { color: #fff; font-size: 24px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <canvas id="gameCanvas" width="600" height="400"></canvas>
+  <div id="score">Score: 0</div>
+</div>
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const scoreDisplay = document.getElementById('score');
+  let score = 0;
+  let ball = { x: 300, y: 200, radius: 20, dx: 3, dy: 4 };
+  function drawBall() {
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff6600';
+    ctx.fill();
+    ctx.closePath();
+  }
+  function update() {
+    ball.x += ball.dx;
+    ball.y += ball.dy;
+    if (ball.x + ball.radius > canvas.width || ball.x - ball.radius < 0) ball.dx = -ball.dx;
+    if (ball.y + ball.radius > canvas.height || ball.y - ball.radius < 0) ball.dy = -ball.dy;
+  }
+  function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBall();
+    update();
+    requestAnimationFrame(gameLoop);
+  }
+  canvas.addEventListener('click', function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const dist = Math.hypot(mouseX - ball.x, mouseY - ball.y);
+    if (dist <= ball.radius) {
+      score++;
+      scoreDisplay.textContent = 'Score: ' + score;
+    }
+  });
+  gameLoop();
+</script>
+</body>
+</html>

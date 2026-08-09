@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>3D Tree Climbing Game</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 5px; pointer-events: none; z-index: 10; }
+  #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: white; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 5px; font-size: 14px; z-index: 10; text-align: center; }
+</style>
+</head>
+<body>
+<div id="info">🌳 Tree Climbing Game - Grab branches and climb!</div>
+<div id="controls">W / Up Arrow = Grab & Pull Up | A/D or Left/Right = Rotate | Release = Fall</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+// --- Setup Scene ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // Sky blue
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(5, 3, 8);
+camera.lookAt(0, 3, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(10, 20, 5);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.width = 1024;
+dirLight.shadow.mapSize.height = 1024;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0xffeedd, 0.4);
+fillLight.position.set(-5, 5, -5);
+scene.add(fillLight);
+
+// --- Ground ---
+const groundGeo = new THREE.PlaneGeometry(30, 30);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.1;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// --- Tree Generation ---
+const treeGroup = new THREE.Group();
+scene.add(treeGroup);
+
+// Trunk
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8B5A2B, roughness: 0.9 });
+const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 4, 8);
+const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+trunk.position.y = 2;
+trunk.castShadow = true;
+treeGroup.add(trunk);
+
+// Branch data: { position, direction, length, thickness, angle }
+const branches = [];
+const branchMat = new THREE.MeshStandardMaterial({ color: 0x6B4226, roughness: 0.8 });
+
+function addBranch(parentPos, direction, length, thickness, angleOffset, depth) {
+  if (depth > 4) return;
+  const angle = Math.atan2(direction.x, direction.z) + angleOffset;
+  const branchLength = length * (0.7 + Math.random() * 0.3);
+  const branchThick = thickness * (0.6 + Math.random() * 0.2);
+  
+  const branchGeo = new THREE.CylinderGeometry(branchThick * 0.6, branchThick, branchLength, 6);
+  const branch = new THREE.Mesh(branchGeo, branchMat);
+  
+  const tilt = 0.3 + Math.random() * 0.5;
+  const bx = parentPos.x + Math.sin(angle) * branchLength * 0.5;
+  const bz = parentPos.z + Math.cos(angle) * branchLength * 0.5;
+  const by = parentPos.y + 0.5 + Math.random() * 0.5;
+  
+  branch.position.set(bx, by, bz);
+  branch.rotation.z = Math.sin(angle) * tilt;
+  branch.rotation.x = Math.cos(angle) * tilt;
+  branch.castShadow = true;
+  treeGroup.add(branch);
+  
+  // Store branch for collision
+  branches.push({
+    mesh: branch,
+    pos: new THREE.Vector3(bx, by, bz),
+    length: branchLength,
+    thickness: branchThick,
+    angle: angle,
+    tilt: tilt
+  });
+  
+  // Recursive sub-branches
+  if (depth < 3 && Math.random() > 0.3) {
+    const subDir = new THREE.Vector3(Math.sin(angle), 0.2, Math.cos(angle)).normalize();
+    addBranch(new THREE.Vector3(bx, by, bz), subDir, branchLength * 0.6, branchThick * 0.6, (Math.random() - 0.5) * 1.2, depth + 1);
+  }
+}
+
+// Generate branches from trunk
+for (let i = 0; i < 8; i++) {
+  const angle = (i / 8) * Math.PI * 2;
+  const dir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+  const height = 1.0 + Math.random() * 2.5;
+  const pos = new THREE.Vector3(0, height, 0);
+  addBranch(pos, dir, 1.0 + Math.random() * 0.8, 0.15 + Math.random() * 0.1, 0, 0);
+}
+
+// Add some leaf clusters
+const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d8a4e, roughness: 0.6 });
+branches.forEach(b => {
+  if (b.length > 0.8) {
+    const leafPos = b.pos.clone().add(new THREE.Vector3(
+      Math.sin(b.angle) * b.length * 0.4,
+      b.tilt * 0.3,
+      Math.cos(b.angle) * b.length * 0.4
+    ));
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.3 + Math.random() * 0.2, 5), leafMat);
+    leaf.position.copy(leafPos);
+    leaf.castShadow = true;
+    treeGroup.add(leaf);
+  }
+});
+
+// --- Player ---
+const playerGroup = new THREE.Group();
+scene.add(playerGroup);
+
+// Body
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3366cc, roughness: 0.5 });
+const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.6, 8), bodyMat);
+body.position.y = 0.3;
+body.castShadow = true;
+playerGroup.add(body);
+
+// Head
+const headMat = new THREE.MeshStandardMaterial({ color: 0xffcc99, roughness: 0.3 });
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8), headMat);
+head.position.y = 0.7;
+head.castShadow = true;
+playerGroup.add(head);
+
+// Arms (visual only)
+const armMat = new THREE.MeshStandardMaterial({ color: 0xffcc99, roughness: 0.5 });
+const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3), armMat);
+leftArm.position.set(-0.3, 0.4, 0);
+leftArm.rotation.z = 0.3;
+playerGroup.add(leftArm);
+
+const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3), armMat);
+rightArm.position.set(0.3, 0.4, 0);
+rightArm.rotation.z = -0.3;
+playerGroup.add(rightArm);
+
+// Player state
+const player = {
+  pos: new THREE.Vector3(0, 0.5, 0),
+  vel: new THREE.Vector3(0, 0, 0),
+  onGround: true,
+  grabbedBranch: null,
+  grabOffset: new THREE.Vector3(),
+  rotation: 0,
+  climbSpeed: 0.02,
+  gravity: -0.015,
+  jumpPower: 0.15
+};
+
+playerGroup.position.copy(player.pos);
+
+// --- Collision Detection ---
+function getClosestBranch(pos, maxDist) {
+  let closest = null;
+  let closestDist = maxDist;
+  
+  branches.forEach(b => {
+    // Simple sphere collision with branch cylinder
+    const dx = pos.x - b.pos.x;
+    const dz = pos.z - b.pos.z;
+    const dy = pos.y - b.pos.y;
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    
+    // Branch is roughly horizontal, so check vertical distance too
+    const horizDist = Math.sqrt(dx*dx + dz*dz);
+    if (horizDist < b.length * 0.5 + 0.3 && Math.abs(dy) < b.thickness * 2 + 0.3) {
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = b;
+      }
+    }
+  });
+  
+  return closest;
+}
+
+function checkBranchStanding(pos) {
+  // Check if player is standing on a branch
+  for (const b of branches) {
+    const dx = pos.x - b.pos.x;
+    const dz = pos.z - b.pos.z;
+    const horizDist = Math.sqrt(dx*dx + dz*dz);
+    if (horizDist < b.length * 0.4 && Math.abs(pos.y - b.pos.y) < 0.3) {
+      return b.pos.y + 0.15;
+    }
+  }
+  return null;
+}
+
+// --- Input ---
+const keys = {};
+window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
+window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+// --- Game Loop ---
+function update() {
+  const dt = 1;
+  
+  // Rotation
+  if (keys['a'] || keys['arrowleft']) player.rotation += 0.04;
+  if (keys['d'] || keys['arrowright']) player.rotation -= 0.04;
+  
+  // Check for grab
+  const grabKey = keys['w'] || keys['arrowup'];
+  
+  if (grabKey && !player.grabbedBranch) {
+    // Try to grab a branch
+    const reachPos = player.pos.clone();
+    reachPos.y += 0.5;
+    const dir = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation);
+    reachPos.add(dir.multiplyScalar(0.5));
+    
+    const branch = getClosestBranch(reachPos, 0.8);
+    if (branch) {
+      player.grabbedBranch = branch;
+      player.grabOffset.copy(player.pos).sub(branch.pos);
+      player.vel.set(0, 0, 0);
+    }
+  }
+  
+  if (player.grabbedBranch) {
+    // Pull up while holding W
+    if (grabKey) {
+      // Move up along branch
+      const upDir = new THREE.Vector3(0, 1, 0);
+      player.pos.add(upDir.multiplyScalar(player.climbSpeed));
+      
+      // Slight forward movement
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation);
+      player.pos.add(forward.multiplyScalar(0.01));
+      
+      player.vel.set(0, 0, 0);
+    } else {
+      // Release branch
+      player.grabbedBranch = null;
+    }
+  } else {
+    // Apply gravity
+    player.vel.y += player.gravity;
+    
+    // Check if standing on branch
+    const standY = checkBranchStanding(player.pos);
+    if (standY !== null && player.vel.y <= 0) {
+      player.pos.y = standY;
+      player.vel.y = 0;
+      player.onGround = true;
+    } else {
+      player.onGround = false;
+    }
+    
+    // Ground collision
+    if (player.pos.y < 0.3) {
+      player.pos.y = 0.3;
+      player.vel.y = 0;
+      player.onGround = true;
+    }
+    
+    // Apply velocity
+    player.pos.y += player.vel.y;
+  }
+  
+  // Update player group
+  playerGroup.position.copy(player.pos);
+  playerGroup.rotation.y = player.rotation;
+  
+  // Camera follow
+  const camOffset = new THREE.Vector3(0, 1.5, 3.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation);
+  camera.position.copy(player.pos).add(camOffset);
+  camera.lookAt(player.pos.x, player.pos.y + 0.5, player.pos.z);
+  
+  renderer.render(scene, camera);
+  requestAnimationFrame(update);
+}
+
+update();
+
+// --- Resize ---
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

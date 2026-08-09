@@ -1,0 +1,57 @@
+
+<!DOCTYPE html>
+<html>
+<head><title>Bouncing Ball Test</title></head>
+<body>
+<canvas id="gameCanvas" width="400" height="300"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let ball = { x: 200, y: 150, radius: 15, dx: 3, dy: 2 };
+let score = 0;
+let clicked = false;
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+  ctx.fillStyle = 'red';
+  ctx.fill();
+  ctx.closePath();
+  ctx.fillStyle = 'black';
+  ctx.font = '16px Arial';
+  ctx.fillText('Score: ' + score, 10, 20);
+}
+
+function update() {
+  // Bounce off edges
+  if (ball.x + ball.radius > canvas.width || ball.x - ball.radius < 0) {
+    ball.dx = -ball.dx;
+  }
+  if (ball.y + ball.radius > canvas.height || ball.y - ball.radius < 0) {
+    ball.dy = -ball.dy;
+  }
+  ball.x += ball.dx;
+  ball.y += ball.dy;
+}
+
+canvas.addEventListener('click', function(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+  const dist = Math.sqrt((mouseX - ball.x) ** 2 + (mouseY - ball.y) ** 2);
+  if (dist <= ball.radius) {
+    score++;
+    clicked = true;
+  }
+});
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>

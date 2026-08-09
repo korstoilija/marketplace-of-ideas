@@ -12,3 +12,6 @@ data/*.sqlite-*
 .beads-credential-key
 .beads/proxieddb/
 enrichments/
+
+# agent scratch snapshots
+workspace/runs/

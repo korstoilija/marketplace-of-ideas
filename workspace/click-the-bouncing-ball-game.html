@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Click the Bouncing Ball</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #1a1a2e; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 100vh; 
+    font-family: Arial, sans-serif;
+    overflow: hidden;
+  }
+  #gameContainer {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  #ball {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    background: radial-gradient(circle at 35% 35%, #e94560, #c23152);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+    transition: transform 0.05s;
+  }
+  #ball:hover {
+    transform: scale(1.1);
+  }
+  #score {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: #e94560;
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 0 0 10px rgba(233, 69, 96, 0.3);
+    z-index: 10;
+    pointer-events: none;
+  }
+  #instructions {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #0f3460;
+    font-size: 14px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <div id="score">Score: 0</div>
+  <div id="ball"></div>
+  <div id="instructions">Click the ball to score!</div>
+</div>
+
+<script>
+  const container = document.getElementById('gameContainer');
+  const ball = document.getElementById('ball');
+  const scoreDisplay = document.getElementById('score');
+  
+  let score = 0;
+  let x = 380;
+  let y = 280;
+  let dx = 3;
+  let dy = 2;
+  const ballSize = 40;
+  
+  function update() {
+    x += dx;
+    y += dy;
+    
+    // Bounce off walls
+    if (x <= 0 || x >= container.clientWidth - ballSize) {
+      dx = -dx;
+      x = Math.max(0, Math.min(x, container.clientWidth - ballSize));
+    }
+    if (y <= 0 || y >= container.clientHeight - ballSize) {
+      dy = -dy;
+      y = Math.max(0, Math.min(y, container.clientHeight - ballSize));
+    }
+    
+    ball.style.left = x + 'px';
+    ball.style.top = y + 'px';
+    
+    requestAnimationFrame(update);
+  }
+  
+  ball.addEventListener('click', function(e) {
+    e.stopPropagation();
+    score++;
+    scoreDisplay.textContent = 'Score: ' + score;
+    
+    // Visual feedback
+    ball.style.transform = 'scale(0.8)';
+    setTimeout(() => {
+      ball.style.transform = 'scale(1)';
+    }, 100);
+    
+    // Slight speed increase
+    dx *= 1.02;
+    dy *= 1.02;
+  });
+  
+  // Prevent container click from scoring
+  container.addEventListener('click', function(e) {
+    if (e.target !== ball) {
+      // Miss feedback
+      container.style.borderColor = '#ff6b6b';
+      setTimeout(() => {
+        container.style.borderColor = '#0f3460';
+      }, 200);
+    }
+  });
+  
+  update();
+</script>
+</body>
+</html>

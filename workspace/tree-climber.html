@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fractal Tree Climber</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #info { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 14px; z-index: 10; }
+  #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: white; background: rgba(0,0,0,0.6); padding: 8px 16px; border-radius: 20px; font-size: 14px; z-index: 10; text-align: center; }
+</style>
+</head>
+<body>
+<div id="info">🌳 Tree Climber | WASD + Space to climb</div>
+<div id="controls">W: Forward | A: Left | S: Backward | D: Right | Space: Jump</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+// --- Setup Scene ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // sky blue
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(8, 6, 12);
+camera.lookAt(0, 3, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+sunLight.position.set(10, 20, 5);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 1024;
+sunLight.shadow.mapSize.height = 1024;
+scene.add(sunLight);
+
+const fillLight = new THREE.DirectionalLight(0x4488ff, 0.3);
+fillLight.position.set(-5, 5, -10);
+scene.add(fillLight);
+
+// --- Ground ---
+const groundGeo = new THREE.PlaneGeometry(30, 30);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x3a7d3a, roughness: 0.8 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.1;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// --- Fractal Tree ---
+const treeGroup = new THREE.Group();
+scene.add(treeGroup);
+
+// Tree parameters
+const trunkHeight = 4;
+const trunkRadius = 0.5;
+const branchAngle = 0.5; // radians
+const branchShrink = 0.65;
+const maxDepth = 5;
+const leafSize = 0.4;
+
+// Store branch segments for collision detection
+const branchMeshes = [];
+
+function createBranch(startPos, direction, length, radius, depth) {
+  if (depth > maxDepth || length < 0.3) return;
+
+  // Create cylinder for this branch segment
+  const geo = new THREE.CylinderGeometry(radius * 0.9, radius, length, 6);
+  const mat = new THREE.MeshStandardMaterial({
+    color: depth === 0 ? 0x8B4513 : (depth < 3 ? 0x6B3410 : 0x5C2E0A),
+    roughness: 0.7,
+    metalness: 0.1
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  // Position and orient the cylinder
+  const midPoint = new THREE.Vector3().copy(startPos).addScaledVector(direction, length / 2);
+  mesh.position.copy(midPoint);
+
+  // Orient cylinder along direction
+  const up = new THREE.Vector3(0, 1, 0);
+  const quat = new THREE.Quaternion().setFromUnitVectors(up, direction);
+  mesh.quaternion.copy(quat);
+
+  treeGroup.add(mesh);
+  branchMeshes.push(mesh);
+
+  // End point of this branch
+  const endPos = new THREE.Vector3().copy(startPos).addScaledVector(direction, length);
+
+  // Add leaves at terminal branches
+  if (depth >= 3 && depth <= maxDepth) {
+    const leafCount = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < leafCount; i++) {
+      const leafGeo = new THREE.SphereGeometry(leafSize * (0.5 + Math.random() * 0.5), 4);
+      const leafMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.25 + Math.random() * 0.1, 0.7, 0.4 + Math.random() * 0.3),
+        roughness: 0.6
+      });
+      const leaf = new THREE.Mesh(leafGeo, leafMat);
+      const offset = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 0.8
+      );
+      leaf.position.copy(endPos).add(offset);
+      leaf.castShadow = true;
+      treeGroup.add(leaf);
+    }
+  }
+
+  // Recursively create child branches
+  if (depth < maxDepth) {
+    const numChildren = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < numChildren; i++) {
+      // Random direction within cone
+      const angle = (i / numChildren) * Math.PI * 2 + Math.random() * 0.5;
+      const spread = branchAngle * (0.6 + Math.random() * 0.4);
+
+      // Create a random direction that deviates from parent direction
+      const perp1 = new THREE.Vector3();
+      const perp2 = new THREE.Vector3();
+      if (Math.abs(direction.y) < 0.9) {
+        perp1.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
+      } else {
+        perp1.crossVectors(direction, new THREE.Vector3(1, 0, 0)).normalize();
+      }
+      perp2.crossVectors(direction, perp1).normalize();
+
+      const childDir = new THREE.Vector3()
+        .copy(direction)
+        .multiplyScalar(Math.cos(spread))
+        .add(perp1.multiplyScalar(Math.sin(spread) * Math.cos(angle)))
+        .add(perp2.multiplyScalar(Math.sin(spread) * Math.sin(angle)))
+        .normalize();
+
+      const childLength = length * branchShrink * (0.8 + Math.random() * 0.4);
+      const childRadius = radius * branchShrink * (0.7 + Math.random() * 0.3);
+
+      createBranch(endPos, childDir, childLength, childRadius, depth + 1);
+    }
+  }
+}
+
+// Build the tree - start from trunk base
+const trunkDir = new THREE.Vector3(0, 1, 0);
+createBranch(new THREE.Vector3(0, 0, 0), trunkDir, trunkHeight, trunkRadius, 0);
+
+// --- Player ---
+const playerGroup = new THREE.Group();
+const playerBody = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8),
+  new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.3 })
+);
+playerBody.position.y = 0.4;
+playerBody.castShadow = true;
+playerGroup.add(playerBody);
+
+const playerHead = new THREE.Mesh(
+  new THREE.SphereGeometry(0.2, 8),
+  new THREE.MeshStandardMaterial({ color: 0xffaa88, roughness: 0.3 })
+);
+playerHead.position.y = 0.9;
+playerHead.castShadow = true;
+playerGroup.add(playerHead);
+
+// Start player on trunk surface
+playerGroup.position.set(0, trunkHeight * 0.3, trunkRadius + 0.3);
+scene.add(playerGroup);
+
+// --- Player Physics ---
+const playerVelocity = new THREE.Vector3(0, 0, 0);
+let isGrounded = false;
+const gravity = -12;
+const jumpSpeed = 5;
+const moveSpeed = 3;
+const friction = 0.85;
+
+// --- Controls ---
+const keys = { w: false, a: false, s: false, d: false, space: false };
+document.addEventListener('keydown', (e) => {
+  switch(e.code) {
+    case 'KeyW': keys.w = true; e.preventDefault(); break;
+    case 'KeyA': keys.a = true; e.preventDefault(); break;
+    case 'KeyS': keys.s = true; e.preventDefault(); break;
+    case 'KeyD': keys.d = true; e.preventDefault(); break;
+    case 'Space': keys.space = true; e.preventDefault(); break;
+  }
+});
+document.addEventListener('keyup', (e) => {
+  switch(e.code) {
+    case 'KeyW': keys.w = false; e.preventDefault(); break;
+    case 'KeyA': keys.a = false; e.preventDefault(); break;
+    case 'KeyS': keys.s = false; e.preventDefault(); break;
+    case 'KeyD': keys.d = false; e.preventDefault(); break;
+    case 'Space': keys.space = false; e.preventDefault(); break;
+  }
+});
+
+// --- Collision Detection ---
+function getClosestBranchPoint(pos) {
+  let closestDist = Infinity;
+  let closestNormal = new THREE.Vector3(0, 1, 0);
+  let closestPoint = null;
+
+  for (const mesh of branchMeshes) {
+    // Simple sphere-based collision using mesh position and bounding sphere
+    const meshPos = mesh.position;
+    const radius = mesh.geometry.parameters.radiusTop || 0.3;
+    const height = mesh.geometry.parameters.height || 1;
+
+    // Project player onto cylinder axis
+    const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
+    const toPlayer = new THREE.Vector3().copy(pos).sub(meshPos);
+    const t = toPlayer.dot(dir);
+    const clampedT = Math.max(-height/2, Math.min(height/2, t));
+    const closestOnAxis = new THREE.Vector3().copy(meshPos).addScaledVector(dir, clampedT);
+    const diff = new THREE.Vector3().copy(pos).sub(closestOnAxis);
+    const dist = diff.length();
+
+    if (dist < closestDist && dist < radius + 0.5) {
+      closestDist = dist;
+      closestNormal.copy(diff).normalize();
+      closestPoint = closestOnAxis;
+    }
+  }
+
+  return { point: closestPoint, normal: closestNormal, dist: closestDist };
+}
+
+// --- Camera Follow ---
+function updateCamera() {
+  const target = playerGroup.position.clone();
+  const offset = new THREE.Vector3(4, 3, 4);
+  // Rotate offset based on player movement direction
+  const desired = target.clone().add(offset);
+  camera.position.lerp(desired, 0.05);
+  camera.lookAt(target);
+}
+
+// --- Game Loop ---
+const clock = new THREE.Clock();
+
+function animate() {
+  const delta = Math.min(clock.getDelta(), 0.05);
+
+  // Movement direction relative to camera
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  forward.y = 0;
+  forward.normalize();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+
+  // Apply movement
+  const moveDir = new THREE.Vector3(0, 0, 0);
+  if (keys.w) moveDir.add(forward);
+  if (keys.s) moveDir.sub(forward);
+  if (keys.a) moveDir.sub(right);
+  if (keys.d) moveDir.add(right);
+
+  if (moveDir.length() > 0) {
+    moveDir.normalize();
+    playerVelocity.x += moveDir.x * moveSpeed * delta;
+    playerVelocity.z += moveDir.z * moveSpeed * delta;
+  }
+
+  // Gravity
+  playerVelocity.y += gravity * delta;
+
+  // Jump
+  if (keys.space && isGrounded) {
+    playerVelocity.y = jumpSpeed;
+    isGrounded = false;
+  }
+
+  // Apply velocity
+  playerGroup.position.x += playerVelocity.x * delta;
+  playerGroup.position.y += playerVelocity.y * delta;
+  playerGroup.position.z += playerVelocity.z * delta;
+
+  // Friction
+  playerVelocity.x *= friction;
+  playerVelocity.z *= friction;
+
+  // Collision with branches
+  const result = getClosestBranchPoint(playerGroup.position);
+  if (result.point && result.dist < 0.5) {
+    // Push player out
+    const pushDist = 0.5 - result.dist;
+    playerGroup.position.addScaledVector(result.normal, pushDist);
+
+    // If normal points upward, we're standing on a branch
+    if (result.normal.y > 0.3 && playerVelocity.y < 0) {
+      playerVelocity.y = 0;
+      isGrounded = true;
+    }
+  }
+
+  // Ground collision
+  if (playerGroup.position.y < 0.3) {
+    playerGroup.position.y = 0.3;
+    if (playerVelocity.y < 0) {
+      playerVelocity.y = 0;
+      isGrounded = true;
+    }
+  }
+
+  // Rotate player to face movement direction
+  if (Math.abs(playerVelocity.x) > 0.01 || Math.abs(playerVelocity.z) > 0.01) {
+    const angle = Math.atan2(playerVelocity.x, playerVelocity.z);
+    playerGroup.rotation.y = angle;
+  }
+
+  updateCamera();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+animate();
+
+// --- Resize ---
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

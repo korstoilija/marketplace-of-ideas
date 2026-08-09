@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Click the Bouncing Ball</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #1a1a2e; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 100vh; 
+    font-family: Arial, sans-serif;
+    overflow: hidden;
+  }
+  #gameContainer {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    background: #16213e;
+    border: 3px solid #0f3460;
+    border-radius: 12px;
+    cursor: crosshair;
+    overflow: hidden;
+  }
+  #ball {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #e94560, #c23152);
+    box-shadow: 0 0 20px rgba(233, 69, 96, 0.6);
+    cursor: pointer;
+    transition: transform 0.05s;
+  }
+  #ball:hover {
+    transform: scale(1.1);
+  }
+  #scoreBoard {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: #fff;
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+  #scoreBoard span {
+    color: #e94560;
+    font-size: 32px;
+  }
+  #message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 48px;
+    font-weight: bold;
+    text-shadow: 0 0 20px rgba(233, 69, 96, 0.8);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 20;
+  }
+  #message.show {
+    opacity: 1;
+  }
+  #speedControl {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    color: #aaa;
+    font-size: 14px;
+    z-index: 10;
+  }
+  #speedControl input {
+    width: 100px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <div id="scoreBoard">Score: <span id="score">0</span></div>
+  <div id="ball"></div>
+  <div id="message">+1</div>
+  <div id="speedControl">
+    Speed: <input type="range" id="speedSlider" min="1" max="10" value="4">
+  </div>
+</div>
+<script>
+  (function() {
+    const container = document.getElementById('gameContainer');
+    const ball = document.getElementById('ball');
+    const scoreDisplay = document.getElementById('score');
+    const message = document.getElementById('message');
+    const speedSlider = document.getElementById('speedSlider');
+    
+    let score = 0;
+    let x = 200, y = 200;
+    let dx = 4, dy = 3;
+    let animationId = null;
+    let isRunning = true;
+    
+    const ballSize = 40;
+    const containerWidth = 800;
+    const containerHeight = 600;
+    
+    function updateBallPosition() {
+      ball.style.left = x + 'px';
+      ball.style.top = y + 'px';
+    }
+    
+    function bounce() {
+      if (!isRunning) return;
+      
+      x += dx;
+      y += dy;
+      
+      // Bounce off walls
+      if (x <= 0 || x + ballSize >= containerWidth) {
+        dx = -dx;
+        x = Math.max(0, Math.min(x, containerWidth - ballSize));
+      }
+      if (y <= 0 || y + ballSize >= containerHeight) {
+        dy = -dy;
+        y = Math.max(0, Math.min(y, containerHeight - ballSize));
+      }
+      
+      updateBallPosition();
+      animationId = requestAnimationFrame(bounce);
+    }
+    
+    function showMessage(text) {
+      message.textContent = text;
+      message.classList.add('show');
+      setTimeout(() => {
+        message.classList.remove('show');
+      }, 400);
+    }
+    
+    ball.addEventListener('click', function(e) {
+      e.stopPropagation();
+      score++;
+      scoreDisplay.textContent = score;
+      showMessage('+1');
+      
+      // Small visual feedback
+      ball.style.transform = 'scale(0.8)';
+      setTimeout(() => {
+        ball.style.transform = 'scale(1)';
+      }, 100);
+      
+      // Slightly increase speed on click
+      const speedFactor = parseInt(speedSlider.value);
+      const baseSpeed = speedFactor;
+      const angle = Math.atan2(dy, dx);
+      const currentSpeed = Math.sqrt(dx*dx + dy*dy);
+      const newSpeed = Math.min(currentSpeed + 0.5, baseSpeed * 2);
+      dx = Math.cos(angle) * newSpeed;
+      dy = Math.sin(angle) * newSpeed;
+    });
+    
+    speedSlider.addEventListener('input', function() {
+      const speedFactor = parseInt(this.value);
+      const currentSpeed = Math.sqrt(dx*dx + dy*dy);
+      if (currentSpeed > 0) {
+        const ratio = speedFactor / (currentSpeed || 1);
+        dx *= ratio;
+        dy *= ratio;
+      } else {
+        dx = speedFactor;
+        dy = speedFactor * 0.75;
+      }
+    });
+    
+    // Start animation
+    updateBallPosition();
+    bounce();
+    
+    // Handle window resize - keep game container centered
+    window.addEventListener('resize', function() {
+      // Container size is fixed, just ensure it stays centered
+    });
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+    });
+  })();
+</script>
+</body>
+</html>

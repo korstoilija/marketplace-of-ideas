@@ -33,7 +33,9 @@ export const SANDBOX_API_DOC = `AVAILABLE FUNCTIONS (only these — nothing else
   await subAgent(prompt) -> verdict
   await llm(prompt) -> string
   await recall(query) -> string  // knowledge retrieval
-  await build(path, content) -> string  // WRITE code to workspace/ — corps can BUILD
+  await build(path, content) -> string  // WRITE code to workspace/
+  await browser.test(path, {wait, actions, probes}) -> {errors,warnings,logs}  // HEADLESS CHROME test
+  browser.exists(path) -> {size,modified} | false  // check if file was built
   await debug() -> object  // self-diagnose: balance, reputation, recent logs, calibration
   await test(snippet) -> string   // REPL: test code snippets
   print(...)
@@ -71,24 +73,151 @@ export function extractCode(response: string): string {
 }
 
 /** Build guaranteed-valid JavaScript from structured content. Zero failure rate. */
-export function buildTemplate(title: string, claims: string[]): string {
+export function buildTemplate(title: string, claims: string[], task: string): string {
   const escapedTitle = JSON.stringify(title);
   const escapedClaims = JSON.stringify(claims);
+  const topicLower = title.toLowerCase() + " " + task.toLowerCase();
+  const isBuildTask = topicLower.includes('build') || topicLower.includes('game') || topicLower.includes('html') || topicLower.includes('code');
+  
   return `// RLM DELIBERATION PROTOCOL
 const {ideaId, claimIds} = ideas.propose({title:${escapedTitle}, summary:"", body:"", claims:${escapedClaims}});
 print("Proposed " + claimIds.length + " claims.");
+const st = state();
+print("My balance before: " + st.balance);
 
+// ═══ STEP 1: BUILD + TEST (before trading — don't bankrupt ourselves) ═══
+${isBuildTask ? `
+{
+  const outputPath = "output.html";
+  const prompt = "Generate complete single HTML file for: " + JSON.stringify(claimIds.map(cid => cid + " (market=" + market.price(cid).toFixed(2) + ")")) + ". Return ONLY code, no markdown fences. Must load all libraries from CDN.";
+  let code = await llm(prompt).catch(e => { print("LLM codegen failed: " + String(e).slice(0,100)); return ""; });
+  if (code && code.length > 100) {
+    code = code.replace(/^\`\`\`[a-z]*\s*\\n?/,'').replace(/\`\`\`\s*$/,'');
+    const r = build(outputPath, code);
+    print("Built: " + r);
+
+    // ═══ TEST IN BROWSER ═══
+    print("Testing in browser...");
+    const testResult = await browser.test(outputPath, {
+      wait: 4000,
+      actions: ["KeyW","KeyW","KeyW","Space","Space","KeyW","KeyW"],
+      probes: { "pageErrors": "window.__pageErrors?.length || 0", "hasGameLoop": "typeof requestAnimationFrame !== 'undefined' ? 1 : 0" }
+    }).catch(e => { print("Browser test failed: " + String(e).slice(0,100)); return {errors:[String(e)],warnings:[],logs:[],exceptions:[],state:{}}; });
+    const totalErrors = testResult.errors.length + testResult.exceptions.length;
+    print("Browser test: " + totalErrors + " errors, " + testResult.warnings.length + " warnings, " + testResult.logs.length + " logs");
+    
+    if (totalErrors > 0) {
+      const errorClaims = [];
+      for (const err of testResult.errors.slice(0, 3)) errorClaims.push("Runtime error in " + outputPath + ": " + err.slice(0, 150));
+      for (const ex of testResult.exceptions.slice(0, 2)) errorClaims.push("Uncaught exception in " + outputPath + ": " + ex.slice(0, 150));
+      if (errorClaims.length > 0) {
+        try {
+          const {claimIds: bugIds} = ideas.propose({
+            title: "browser-test-found-bugs-in-" + outputPath.replace(/[^a-z0-9]/g,'-'),
+            summary: "Browser test found " + totalErrors + " errors/exceptions",
+            body: "Test ran with keyboard simulation. Errors: " + JSON.stringify(testResult.errors.slice(0,5)),
+            claims: errorClaims
+          });
+          print("Created " + bugIds.length + " bug claims — backed by browser evidence");
+          for (const bid of bugIds) {
+            for (const err of testResult.errors.slice(0, 3)) evidence.submit(bid, "Browser console error: " + err.slice(0, 200), "counter", 0.9);
+            for (const ex of testResult.exceptions.slice(0, 2)) evidence.submit(bid, "Uncaught exception: " + ex.slice(0, 200), "counter", 0.9);
+            try { market.buyNo(bid, 20); print("  Bought NO on " + bid + " (bug exists — backed by evidence)"); } catch(e) { print("  Trade failed (low balance): " + String(e).slice(0,80)); }
+          }
+        } catch(e) { print("Bug claim creation skipped: " + String(e).slice(0,100)); }
+      }
+    } else {
+      const {claimIds: passIds} = ideas.propose({title:"browser-test-passed-"+outputPath.replace(/[^a-z0-9]/g,'-'), claims:[outputPath + " runs without JavaScript errors in headless browser"]});
+      try { market.buyYes(passIds[0], 30); print("Test clean — bought YES on " + passIds[0]); } catch(e) { print("Trade failed (low balance)"); }
+    }
+    for (const log of testResult.logs.slice(0, 5)) { try { for (const cid of claimIds) { evidence.submit(cid, log.slice(0, 200), log.includes("error")||log.includes("fail")?"counter":"supporting", 0.5); } } catch {} }
+  } else { print("Build skipped — LLM returned " + (code?.length||0) + " chars"); }
+}
+` : ''}
+
+// ═══ STEP 2: EVALUATE + TRADE (with remaining balance) ═══
 for (const cid of claimIds) {
   const result = await evaluate(cid, "evidence for", "evidence against");
   const conf = result?.aggregate?.confidence || 0.5;
   print("Evaluated " + cid + ": confidence=" + conf.toFixed(2));
-  const shares = Math.max(10, Math.round(Math.abs(conf - 0.5) * 300));
-  const before = market.price(cid);
-  if (conf > 0.55) { market.buyYes(cid, shares); print("  Bought YES " + shares + "sh"); }
-  else if (conf < 0.45) { market.buyNo(cid, shares); print("  Bought NO " + shares + "sh"); }
-  else { print("  Holding — market uncertain"); }
+  const shares = Math.min(20, Math.max(5, Math.round(Math.abs(conf - 0.5) * 60)));
+  try {
+    if (conf > 0.55) { market.buyYes(cid, shares); print("  Bought YES " + shares + "sh"); }
+    else if (conf < 0.45) { market.buyNo(cid, shares); print("  Bought NO " + shares + "sh"); }
+    else { print("  Holding — market uncertain"); }
+  } catch(e) { print("  Trade failed: " + String(e).slice(0,80)); }
 }
 print("Deliberation complete. " + claimIds.length + " claims evaluated and traded.");
+
+${isBuildTask ? `
+// ═══ BUILD + TEST ═══
+const outputPath = "output.html";
+const prompt = "Generate complete single HTML file for: " + JSON.stringify(claimIds.map(cid => cid + " (market=" + market.price(cid).toFixed(2) + ")")) + ". Return ONLY code, no markdown fences. Must load all libraries from CDN.";
+let code = await llm(prompt);
+if (code && code.length > 100) {
+  code = code.replace(/^\`\`\`[a-z]*\s*\\n?/,'').replace(/\`\`\`\s*$/,'');
+  const r = build(outputPath, code);
+  print("Built: " + r);
+
+  // ═══ TEST IN BROWSER ═══
+  print("Testing in browser...");
+  const testResult = await browser.test(outputPath, {
+    wait: 4000,
+    actions: ["KeyW","KeyW","KeyW","Space","Space","KeyW","KeyW"],
+    probes: { "pageErrors": "window.__pageErrors?.length || 0", "hasGameLoop": "typeof requestAnimationFrame !== 'undefined' ? 1 : 0" }
+  });
+  const totalErrors = testResult.errors.length + testResult.exceptions.length;
+  print("Browser test: " + totalErrors + " errors, " + testResult.warnings.length + " warnings, " + testResult.logs.length + " logs");
+  
+  // ═══ TRADABLE CLAIMS FROM TEST RESULTS ═══
+  if (totalErrors > 0) {
+    const errorClaims = [];
+    for (const err of testResult.errors.slice(0, 3)) {
+      errorClaims.push("Runtime error in " + outputPath + ": " + err.slice(0, 150));
+    }
+    for (const ex of testResult.exceptions.slice(0, 2)) {
+      errorClaims.push("Uncaught exception in " + outputPath + ": " + ex.slice(0, 150));
+    }
+    if (errorClaims.length > 0) {
+      try {
+        const { claimIds: bugIds } = ideas.propose({
+          title: "browser-test-found-bugs-in-" + outputPath.replace(/[^a-z0-9]/g,'-'),
+          summary: "Browser test found " + totalErrors + " errors/exceptions",
+          body: "Test ran with keyboard simulation. Errors: " + JSON.stringify(testResult.errors.slice(0,5)),
+          claims: errorClaims
+        });
+        print("Created " + bugIds.length + " bug claims — backed by browser evidence");
+        for (const bid of bugIds) {
+          for (const err of testResult.errors.slice(0, 3)) {
+            evidence.submit(bid, "Browser console error: " + err.slice(0, 200), "counter", 0.9);
+          }
+          for (const ex of testResult.exceptions.slice(0, 2)) {
+            evidence.submit(bid, "Uncaught exception: " + ex.slice(0, 200), "counter", 0.9);
+          }
+          market.buyNo(bid, 30);
+          print("  Bought NO on " + bid + " (bug exists — backed by evidence)");
+        }
+      } catch(e) { print("Bug claim creation skipped: " + String(e).slice(0,100)); }
+    }
+  } else {
+    const { claimIds: passIds } = ideas.propose({
+      title: "browser-test-passed-" + outputPath.replace(/[^a-z0-9]/g,'-'),
+      claims: [outputPath + " runs without JavaScript errors in headless browser"]
+    });
+    market.buyYes(passIds[0], 50);
+    print("Test clean — bought YES on " + passIds[0]);
+  }
+
+  // Log console output as evidence for feature claims
+  for (const log of testResult.logs.slice(0, 5)) {
+    try {
+      for (const cid of claimIds) {
+        evidence.submit(cid, log.slice(0, 200), log.includes("error") || log.includes("fail") ? "counter" : "supporting", 0.5);
+      }
+    } catch {}
+  }
+}
+` : ''}
 `;
 }
 
@@ -103,7 +232,7 @@ export function makeCodeGenerator(llm: AxLLM): CodeGenerator {
         const res = await contentSig.forward(llm, { topic: inputs.task, fileList: inputs.stateMetadata || "" });
         const title = String(res.title ?? "").slice(0, 100) || "Untitled";
         const claims = (Array.isArray(res.claims) ? res.claims : []).filter((c: unknown) => typeof c === "string").slice(0, 3);
-        if (claims.length > 0) return buildTemplate(title, claims as string[]);
+        if (claims.length > 0) return buildTemplate(title, claims as string[], inputs.task);
       } catch { /* fall through to codegen */ }
     }
 

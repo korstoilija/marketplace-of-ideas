@@ -1,10 +1,5 @@
 import { createContext, runInContext, type Context } from "node:vm";
 import type { Store } from "../store/store.js";
-import { TargetJail } from "./target.js";
-import { AgentPool } from "./pool.js";
-import { writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { browserTest } from "./browser.js";
 
 const TRUNCATE_STDOUT = 1000;
 
@@ -14,8 +9,6 @@ export interface SandboxConfig {
   subAgent: (prompt: string) => Promise<unknown>;
   llm: (prompt: string) => Promise<string>;
   recall?: (query: string) => Promise<string>;
-  target?: TargetJail;
-  charge?: (tokens: number) => boolean;  // Corporation pays for LLM calls
   timeoutMs?: number;
 }
 
@@ -66,12 +59,8 @@ export class Sandbox {
         positions: () => store.getPositions(agentId),
       },
       evidence: {
-        submit: (claimId: string, excerpt: string, stance: "supporting" | "counter", relevance?: number) => {
-          if (!excerpt || excerpt.length < 5) return 0;
-          // Error messages are real data — treat as counter evidence (the file wasn't found, the call failed)
-          if (excerpt.includes("path not found") || excerpt.includes("target read error")) stance = "counter";
-          return store.addEvidence({ claimId, excerpt, stance, relevance, submittedBy: agentId });
-        },
+        submit: (claimId: string, excerpt: string, stance: "supporting" | "counter", relevance?: number) =>
+          store.addEvidence({ claimId, excerpt, stance, relevance, submittedBy: agentId }),
         list: (claimId: string) =>
           store.listEvidence(claimId).map(e => ({ excerpt: e.excerpt, stance: e.stance, relevance: e.relevance })),
       },
@@ -79,7 +68,6 @@ export class Sandbox {
       evaluate: async (claimId: string, supporting: string, counter: string) => {
         const claim = store.getClaim(claimId);
         const claimText = claim?.text || claimId;
-        if (!claimId || claimId === "undefined") return { aggregate: { confidence: 0.5, consensus: 1, divergence: 0 } };
         const prompt = `Evaluate this claim. Return a confidence score 0-1.\n\nCLAIM: ${claimText}\n\nSUPPORTING: ${supporting || "none"}\n\nCOUNTER: ${counter || "none"}\n\nReply with ONLY a JSON object: {"confidence": 0.X, "reasoning": "why"}`;
         
         // Primary evaluation
@@ -125,72 +113,11 @@ export class Sandbox {
         try { return await cfg.recall(String(query)); }
         catch (e) { return "recall error: " + String(e); }
       },
-      source: () => `MARKETPLACE CODEBASE (20 TypeScript files):
-  store/ — SQLite db + schema   market/ — LMSR math
-  engine/ — agent, sandbox, codegen, harness, budget
-  server/ — HTTP+WS API, cards, metrics
-  diversity/ — embeddings, Hill diversity
-  optimize/ — GEPA prompt optimization
-  public/ — web UI (index.html, app.js)
-  State: propose→evidence→evaluate→recurse(ambiguous)→trade→nominate(0.7/0.3)→adjudicate→GEPA`,
-      target: cfg.target ? {
-        list: (glob?: string) => { try { return cfg.target!.list(glob); } catch(e) { return []; } },
-        read: (path: string, offset = 0, maxBytes = 32768) => { try { return cfg.target!.read(path, offset, maxBytes); } catch(e) { return "target read error: " + (e instanceof Error ? e.message : String(e)); } },
-      } : undefined,
-      /** BUILD: corporations write code, not just observe. */
-      build: (path: string, content: string) => {
-        const fullPath = join(process.cwd(), "workspace", path);
-        try { mkdirSync(dirname(fullPath), { recursive: true }); } catch {}
-        writeFileSync(fullPath, content);
-        return "built: workspace/" + path + " (" + content.length + " chars)";
-      },
-      /** DEBUG: corporations inspect the marketplace state and their own performance. */
-      debug: () => {
-        const me = store.getAgent(agentId);
-        const logs = store.db.prepare("SELECT iteration, substr(stdout,1,100) as out FROM agent_iterations WHERE agent_id=? ORDER BY id DESC LIMIT 5").all(agentId) as Array<{ iteration: number; out: string }>;
-        const trades = store.db.prepare("SELECT COUNT(*) as n, SUM(cost) as spent FROM orders WHERE agent_id=?").get(agentId) as { n: number; spent: number };
-        const cal = store.db.prepare("SELECT COUNT(*) as n, AVG(1-brier) as cal FROM score_ledger WHERE agent_id=? AND brier IS NOT NULL").get(agentId) as { n: number; cal: number };
-        return {
-          agent: agentId,
-          balance: me?.balance ?? 0,
-          reputation: me?.reputation ?? 0.5,
-          recentLogs: logs.map(l => `#${l.iteration}: ${l.out}`),
-          trades: trades.n,
-          spent: trades.spent?.toFixed(0) ?? "0",
-          calibration: cal.n > 0 ? cal.cal?.toFixed(3) : "no data",
-        };
-      },
-      /** Interactive REPL: test code snippets and see results immediately.
-       *  Agents use test() to explore the sandbox API before committing code. */
-      test: async (snippet: string) => {
-        try {
-          const vm = await import("node:vm");
-          const ctx = vm.createContext({ ...this.box, __testResult: undefined });
-          await vm.runInContext(snippet, ctx, { timeout: 5000 });
-          return ctx["__testResult"] !== undefined ? ctx["__testResult"] : "ok (no return value)";
-        } catch (e) {
-          return "ERROR: " + (e instanceof Error ? e.message : String(e));
-        }
-      },
-      /** BROWSER TEST: launch headless Chrome, load a game, press keys, capture errors.
-       *  Corps use this to verify builds and find bugs — discoveries become tradable claims. */
-      browser: {
-        test: async (path: string, opts?: { wait?: number; actions?: string[]; probes?: Record<string, string> }) => {
-          try {
-            return await browserTest(path, opts ?? {});
-          } catch (e) {
-            return { errors: [String(e)], warnings: [], logs: [], exceptions: [], state: {}, timeout: false, url: path };
-          }
-        },
-        /** Check if a path was built recently (exists + size + mtime). */
-        exists: (path: string) => {
-          const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
-          const full = join(process.cwd(), "workspace", path);
-          if (!existsSync(full)) return false;
-          const s = statSync(full);
-          return { size: s.size, modified: s.mtimeMs };
-        },
-      },
+      source: () => `RLM ENGINE (library)
+  store/ — SQLite world + schema (applyAdjudication is the ONLY settlement path)
+  market/ — LMSR math (cost, price, 1:1 redemption)
+  engine/ — agent (recursive loop), sandbox (this API), codegen, harness, budget
+  Loop: propose -> evidence -> evaluate -> subAgent(if ambiguous) -> trade -> nominate`,
       Final: undefined as unknown,
     };
 
@@ -217,9 +144,8 @@ export class Sandbox {
         timedOut = true;
         error = `[TIMEOUT after ${this.timeoutMs / 1000}s]`;
       } else {
-        error = `[ERROR: ${msg}]`;
+        error = msg;
       }
-      this.captured += `\n${error}\n`;
     }
 
     const stdout = this.captured + (error ? `\n[ERROR: ${error}]` : "");
