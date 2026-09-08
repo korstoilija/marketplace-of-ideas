@@ -1,0 +1,9 @@
+const $=s=>document.querySelector(s);const KEY='moi-pwa-v1';let ideas=JSON.parse(localStorage.getItem(KEY)||'[]');
+const title=$('#title'),body=$('#body'),value=$('#value'),confidence=$('#confidence'),list=$('#list'),sort=$('#sort');
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function save(){localStorage.setItem(KEY,JSON.stringify(ideas));render()}
+function score(i){return i.value*(i.confidence/100)}
+function render(){let xs=[...ideas];if(sort.value==='rank')xs.sort((a,b)=>score(b)-score(a));if(sort.value==='new')xs.sort((a,b)=>b.created-a.created);if(sort.value==='confidence')xs.sort((a,b)=>b.confidence-a.confidence);$('#count').textContent=`${ideas.length} idea${ideas.length===1?'':'s'}`;list.innerHTML=xs.length?xs.map(i=>`<article class="idea"><div class="topline"><h2>${esc(i.title)}</h2><span class="pill rank">EV ${score(i).toFixed(1)}</span></div>${i.body?`<p>${esc(i.body)}</p>`:''}<div class="meta"><span>value ${i.value}/10</span><span>confidence ${i.confidence}%</span><span>${new Date(i.created).toLocaleDateString()}</span></div><button class="danger" data-del="${i.id}">delete</button></article>`).join(''):'<div class="empty">No ideas yet.</div>';document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ideas=ideas.filter(i=>i.id!==b.dataset.del);save()})}
+value.oninput=()=>$('#vout').textContent=value.value;confidence.oninput=()=>$('#cout').textContent=confidence.value;sort.onchange=render;
+$('#add').onclick=()=>{const t=title.value.trim();if(!t){title.focus();return}ideas.push({id:crypto.randomUUID(),title:t,body:body.value.trim(),value:+value.value,confidence:+confidence.value,created:Date.now()});title.value='';body.value='';save()};
+if('serviceWorker'in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));render();
